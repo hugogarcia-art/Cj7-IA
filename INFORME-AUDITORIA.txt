@@ -1,0 +1,1137 @@
+================================================================================
+INFORME DE AUDITORIA Y REESTRUCTURACION - CJ7 IA
+================================================================================
+
+Repositorio  : https://github.com/hugogarcia-art/Cj7-IA
+Produccion   : https://cj7-ia.onrender.com
+Fecha        : 8 de septiembre de 2026
+Punto base   : 7a5c65e "URLs de produccion conectadas al backend de Render"
+Cambios      : 4 commits, 54 archivos, +2654 / -737 lineas
+Estado       : funcionando en produccion, pero con 2 commits SIN MERGEAR
+               en la rama seguridad-y-despliegue. Ver seccion 15.
+
+Este documento describe todo lo que se modifico, por que se modifico, y como
+esta estructurado el proyecto ahora. Esta pensado para que otra persona (o otro
+modelo) pueda continuar el trabajo sin tener que reconstruir el contexto.
+
+
+================================================================================
+1. RESUMEN EJECUTIVO
+================================================================================
+
+La aplicacion funcionaba, pero tenia la seguridad basica sin implementar:
+
+  - Las contrasenas se guardaban en texto plano.
+  - El secreto que firma los tokens estaba escrito en el codigo, publicado en
+    GitHub.
+  - NINGUN endpoint pedia autenticacion: cualquiera que conociera la URL se
+    descargaba la base de clientes completa.
+
+Se implemento autenticacion real (bcrypt + JWT + guard global), aislamiento de
+datos por cuenta y validacion de entrada. Ademas se reestructuro el despliegue
+para que UN SOLO servicio de Render sirva tanto la aplicacion web como la API.
+
+Todo quedo verificado en produccion y los datos existentes se conservaron
+intactos: 1 usuario, 3 clientes, 3 productos, 52 mensajes.
+
+
+================================================================================
+2. VULNERABILIDADES ENCONTRADAS Y CORREGIDAS
+================================================================================
+
+--------------------------------------------------------------------------------
+2.1  CONTRASENAS EN TEXTO PLANO                                     [CRITICO]
+--------------------------------------------------------------------------------
+
+ANTES
+  auth.service.ts comparaba directamente:   user.password !== password
+  La contrasena se guardaba tal cual en la columna password.
+
+  Cualquiera con acceso de lectura a la base de datos veia todas las
+  contrasenas en claro. Como la gente reutiliza contrasenas, eso compromete
+  tambien sus correos y otras cuentas ajenas a esta aplicacion.
+
+AHORA
+  Hash bcrypt con 12 rondas. El login usa bcrypt.compare(), nunca comparacion
+  directa.
+
+  Cuando el usuario no existe se compara igualmente contra un hash falso, para
+  que el tiempo de respuesta no revele que correos estan registrados. Eso evita
+  la enumeracion de usuarios por temporizacion.
+
+MIGRACION
+  Precisamente porque estaban en claro, se pudieron hashear sin obligar a nadie
+  a registrarse de nuevo. Ademas el login detecta una contrasena antigua sin
+  hashear y la migra al vuelo en el primer acceso correcto. Nadie pierde el
+  acceso.
+
+ARCHIVOS
+  backend/src/auth/auth.service.ts
+  backend/scripts/hash-passwords.ts   (script de migracion, idempotente)
+
+
+--------------------------------------------------------------------------------
+2.2  SECRETO JWT ESCRITO EN EL CODIGO                               [CRITICO]
+--------------------------------------------------------------------------------
+
+ANTES
+  auth.module.ts:   secret: 'cj7_ia_secreto_super_seguro'
+
+  Ese texto esta publicado en GitHub. Con el, cualquiera podia FABRICAR un
+  token valido para cualquier usuario sin necesidad de contrasena. Era la llave
+  maestra del sistema, publicada.
+
+AHORA
+  Sale de la variable de entorno JWT_SECRET, y NO tiene valor por defecto: si
+  falta, el servidor se niega a arrancar.
+
+  Esa decision es deliberada. Es preferible un servicio caido, que se nota al
+  instante, a un servicio que arranca firmando tokens con un secreto que
+  cualquiera puede leer.
+
+ARCHIVOS
+  backend/src/auth/auth.module.ts
+  backend/src/common/env.ts   (helper requireEnv, falla temprano)
+
+
+--------------------------------------------------------------------------------
+2.3  NINGUN ENDPOINT PROTEGIDO                                      [CRITICO]
+--------------------------------------------------------------------------------
+
+ANTES
+  /clients, /products, /clients/export/csv, /clients/export/vcard: todos
+  publicos. Se comprobo contra el servicio real:
+
+      GET https://cj7-ia.onrender.com/clients   ->   HTTP 200, 933 bytes
+
+  Sin token, sin nada. Nombres y telefonos de los clientes servidos a
+  cualquiera. Ademas del dano comercial, es una fuga de datos personales.
+
+AHORA
+  JwtAuthGuard registrado como guard GLOBAL mediante APP_GUARD. Todo exige un
+  Bearer token valido, salvo lo marcado con @Public():
+
+      /health, /auth/login, /auth/register, /whatsapp/webhook
+
+  Comprobado en produccion tras el despliegue:
+
+      GET /clients              ->   401
+      GET /products             ->   401
+      GET /clients/export/csv   ->   401
+
+DETALLE
+  El guard tambien acepta el token por query string (?token=...). Hizo falta
+  porque las descargas de vCard y CSV iban por enlace directo, y una etiqueta
+  <a href> no puede enviar cabeceras. Al final el frontend paso a usar fetch +
+  blob, pero esa via queda soportada.
+
+ARCHIVOS
+  backend/src/auth/guards/jwt-auth.guard.ts
+  backend/src/auth/decorators/public.decorator.ts
+  backend/src/app.module.ts
+
+
+--------------------------------------------------------------------------------
+2.4  SIN AISLAMIENTO ENTRE CUENTAS                                  [CRITICO]
+--------------------------------------------------------------------------------
+
+ANTES
+  getClients() devolvia TODOS los clientes de la base, sin filtrar por dueno.
+  Y como el registro es publico, cualquiera podia crearse una cuenta y ver la
+  cartera completa de clientes del negocio.
+
+AHORA
+  Cada consulta filtra por el userId que viene del token.
+
+  Las modificaciones usan updateMany / deleteMany con { id, userId } en vez de
+  update({ where: { id } }). La diferencia importa: asi nadie puede editar ni
+  borrar un registro ajeno adivinando su identificador.
+
+ARCHIVOS
+  backend/src/client/client.service.ts
+  backend/src/product/product.service.ts
+  backend/src/auth/decorators/current-user.decorator.ts
+
+
+--------------------------------------------------------------------------------
+2.5  USUARIO ADMIN CON CONTRASENA PUBLICA                           [CRITICO]
+--------------------------------------------------------------------------------
+
+ANTES
+  En CUATRO sitios distintos del codigo aparecia el mismo bloque:
+
+      await prisma.user.create({
+        data: {
+          username: 'admin',
+          email: 'admin@cj7ia.com',
+          password: 'password_seguro_123',
+          ...
+        }
+      })
+
+  Si la tabla de usuarios estaba vacia, el sistema se creaba solo una cuenta
+  administradora cuya contrasena esta publicada en GitHub.
+
+AHORA
+  Eliminado por completo. Los datos que entran por WhatsApp se asignan al
+  usuario indicado en WHATSAPP_OWNER_EMAIL, o a la cuenta mas antigua si esa
+  variable esta vacia. Si no existe ninguna cuenta, se registra un error y no
+  se crea nada.
+
+ARCHIVOS
+  backend/src/whatsapp/whatsapp.service.ts
+  (eliminado de client.service.ts, product.service.ts, whatsapp.controller.ts)
+
+
+--------------------------------------------------------------------------------
+2.6  WEBHOOK DE WHATSAPP SIN VERIFICAR FIRMA                        [ALTO]
+--------------------------------------------------------------------------------
+
+ANTES
+  POST /whatsapp/webhook aceptaba cualquier peticion. Un tercero que conociera
+  la URL podia inyectar mensajes falsos: llenaba el CRM de contactos inventados
+  y, sobre todo, disparaba una llamada a OpenAI por cada mensaje falso. Gasto
+  ajeno, factura tuya.
+
+AHORA
+  Se valida la cabecera X-Hub-Signature-256 con HMAC-SHA256 contra
+  META_APP_SECRET, usando timingSafeEqual para no filtrar informacion por el
+  tiempo de comparacion.
+
+  Necesita el cuerpo crudo de la peticion, sin parsear. Por eso main.ts crea la
+  aplicacion con { rawBody: true }.
+
+COMPORTAMIENTO SEGUN EL VALOR DE META_APP_SECRET
+
+  VACIO       El webhook acepta todo, pero deja un aviso en los logs.
+              Es intencionado: permite desplegar sin romper el servicio
+              mientras se termina de configurar Meta.
+
+  CORRECTO    Funciona y ademas protege.
+
+  INCORRECTO  RECHAZA TODOS LOS MENSAJES con 403 y el agente deja de
+              responder.
+
+  El tercer caso ocurrio de verdad durante el despliegue: se habia quedado el
+  texto de ejemplo "PEGA_AQUI_TU_APP_SECRET" en la variable. Es la primera
+  cosa que hay que mirar si el agente de WhatsApp deja de contestar.
+
+ARCHIVOS
+  backend/src/whatsapp/whatsapp.service.ts   (metodo verifySignature)
+  backend/src/whatsapp/whatsapp.controller.ts
+  backend/src/main.ts
+
+
+--------------------------------------------------------------------------------
+2.7  TOKEN DE VERIFICACION DE META EN EL CODIGO                     [ALTO]
+--------------------------------------------------------------------------------
+
+ANTES
+  whatsapp.controller.ts:   const verifyToken = 'cj7_ia_token_seguro'
+  Publicado en GitHub.
+
+AHORA
+  Sale de WHATSAPP_VERIFY_TOKEN. Si esa variable esta vacia, la verificacion
+  devuelve siempre 403: no hay valor por defecto que nadie pueda adivinar.
+
+  Este token solo se usa cuando se da de alta o se vuelve a guardar la URL del
+  webhook en Meta, no en cada mensaje. Si el valor de Render y el de Meta no
+  coinciden, la entrega de mensajes sigue funcionando, pero fallara el dia que
+  se toque esa pantalla.
+
+
+--------------------------------------------------------------------------------
+2.8  CORS ABIERTO                                                   [ALTO]
+--------------------------------------------------------------------------------
+
+ANTES
+  origin: ['http://localhost:3000', process.env.FRONTEND_URL || '*']
+
+  Ese asterisco de reserva permitia a CUALQUIER sitio web hacer peticiones a la
+  API. Combinado con la ausencia de autenticacion, era una puerta abierta.
+
+AHORA
+  Lista blanca explicita: localhost:3000 mas lo que se declare en
+  FRONTEND_URLS. Y al servir la aplicacion desde el mismo servicio, las
+  peticiones son del mismo origen y CORS ya ni interviene.
+
+
+--------------------------------------------------------------------------------
+2.9  SIN VALIDACION DE ENTRADA                                      [ALTO]
+--------------------------------------------------------------------------------
+
+ANTES
+  Los controladores aceptaban cualquier objeto JSON tal cual y se lo pasaban a
+  Prisma. Sin longitudes maximas, sin comprobacion de formatos, sin filtrado de
+  campos.
+
+AHORA
+  ValidationPipe global con DTOs de class-validator:
+
+      whitelist              descarta las propiedades no declaradas en el DTO
+      forbidNonWhitelisted   y ademas responde 400 si llegan
+      transform              convierte tipos segun el DTO
+
+  El whitelist cierra de paso una escalada de privilegios: antes se podia
+  enviar {"role":"ADMIN"} en el registro y crearse una cuenta administradora.
+  Comprobado en produccion:
+
+      POST /auth/register  con {"role":"ADMIN", ...}
+      ->  400  "property role should not exist"
+
+ARCHIVOS
+  backend/src/auth/dto/auth.dto.ts
+  backend/src/client/dto/client.dto.ts
+  backend/src/product/dto/product.dto.ts
+  backend/src/main.ts
+
+
+--------------------------------------------------------------------------------
+2.10  INYECCION DE FORMULAS EN EL EXPORT CSV                        [MEDIO]
+--------------------------------------------------------------------------------
+
+ANTES
+  Los campos se concatenaban entre comillas sin escapar nada.
+
+  Un cliente cuyo nombre empiece por = + - o @ se convierte en codigo
+  EJECUTABLE al abrir el CSV en Excel o Google Sheets. Un nombre como
+  =HYPERLINK(...) puede exfiltrar el contenido de la hoja.
+
+AHORA
+  csvField() duplica las comillas y antepone un apostrofo a cualquier valor que
+  empiece por = + - @ tabulador o retorno de carro, que son los caracteres que
+  Excel interpreta como inicio de formula.
+
+  Se anadio ademas el BOM UTF-8 para que Excel abra bien los acentos.
+
+ARCHIVOS
+  backend/src/common/csv.ts
+  backend/src/client/client.controller.ts
+
+
+--------------------------------------------------------------------------------
+2.11  SUBIDA DE IMAGENES SIN RESTRICCIONES                          [MEDIO]
+--------------------------------------------------------------------------------
+
+ANTES
+  Se aceptaba cualquier archivo, de cualquier tamano, guardado como
+  producto-{timestamp}.jpg. Dos subidas en el mismo milisegundo se pisaban
+  entre si, y la extension .jpg era mentira si se subia otra cosa.
+
+AHORA
+  - Solo JPG, PNG, WEBP y GIF, validado por mimetype
+  - Maximo 5 MB, aplicado tambien en el interceptor de multer
+  - El nombre lo genera el servidor con randomUUID()
+  - La extension se deriva del mimetype validado, no del nombre original
+  - Cada usuario guarda en su propia carpeta:  {userId}/{uuid}.{ext}
+
+ARCHIVOS
+  backend/src/storage/storage.service.ts
+  backend/src/product/product.controller.ts
+
+
+--------------------------------------------------------------------------------
+2.12  SIN LIMITE DE INTENTOS                                        [MEDIO]
+--------------------------------------------------------------------------------
+
+AHORA, con @nestjs/throttler:
+
+      /auth/login        5 peticiones por minuto y por IP
+      /auth/register     3 peticiones por minuto y por IP
+      webhook           60 por minuto (frena picos de gasto en OpenAI)
+      global           120 por minuto
+
+
+--------------------------------------------------------------------------------
+2.13  WEBSOCKET SIN AUTENTICAR                                      [MEDIO]
+--------------------------------------------------------------------------------
+
+ANTES
+  @WebSocketGateway({ cors: true }) y notifyNewEvent() emitia a TODOS los
+  clientes conectados. Cualquiera podia conectarse y escuchar los eventos de
+  cualquier negocio.
+
+AHORA
+  Se exige un JWT valido en el handshake. Cada socket entra a la sala
+  user:{id} de su propietario, y notifyUser() emite solo a esa sala.
+
+ARCHIVOS
+  backend/src/events/events.gateway.ts
+
+
+--------------------------------------------------------------------------------
+2.14  OTRAS MEJORAS
+--------------------------------------------------------------------------------
+
+  - helmet en el backend, con cabeceras de seguridad HTTP
+  - Los logs ya no imprimen META_TOKEN cuando falla un envio
+  - El prompt de la IA instruye explicitamente ignorar cualquier intento del
+    cliente de reescribir sus reglas. El mensaje del cliente entra como turno
+    de usuario, nunca concatenado al prompt de sistema
+  - ParseUUIDPipe en los parametros :id, para rechazar identificadores
+    malformados antes de llegar a la base de datos
+
+
+================================================================================
+3. BUGS FUNCIONALES CORREGIDOS
+================================================================================
+
+3.1  EDITAR UN PRODUCTO NUNCA FUNCIONO
+     El frontend hacia PUT /products/:id, pero ProductController solo tenia
+     @Get, @Post y @Delete. Siempre respondia 404.
+     Se anadio @Put(':id'), con soporte para reemplazar la imagen: si no se
+     sube una nueva, se conserva la anterior.
+
+3.2  EL BUILD DE PRODUCCION SE ROMPIA EN SILENCIO
+     Al anadir la carpeta scripts/, TypeScript paso a tener dos raices y
+     empezo a emitir dist/src/main.js en vez de dist/main.js. El comando de
+     arranque node dist/main no encontraba el punto de entrada.
+     Corregido excluyendo scripts/ en tsconfig.build.json.
+     Este habria roto el despliegue en Render sin dar una pista clara.
+
+3.3  CUATRO POOLS DE CONEXIONES A POSTGRES
+     Cada servicio hacia new PrismaClient(). En los planes gratuitos de
+     Supabase y Render eso agota el limite de conexiones.
+     Ahora hay un PrismaService unico, expuesto en un modulo @Global.
+
+3.4  LA TABLA DE CLIENTES ESTABA DESCUADRADA
+     La cabecera declaraba 7 columnas (Nombre, Contacto, Etiquetas, Estado,
+     Registro, Acciones) pero cada fila solo pintaba 5: faltaban las celdas de
+     Estado y Registro. Anadidas.
+
+3.5  next/image HABRIA FALLADO EN PRODUCCION
+     Las fotos de producto vienen de Supabase, un host externo, y
+     next.config.ts estaba vacio, sin images.remotePatterns. En produccion eso
+     lanza "hostname is not configured". La vista previa local usa ademas una
+     URL blob:, que tampoco puede optimizarse.
+     (Con la exportacion estatica posterior se resolvio con unoptimized.)
+
+3.6  CARRERA AL ASIGNAR clientCode
+     El codigo hacia "buscar el ultimo y sumar 1" sin transaccion, sobre una
+     columna @unique. Dos registros simultaneos pedian el mismo numero y uno
+     fallaba. Ahora se reintenta hasta 5 veces ante el error P2002 de Prisma.
+
+3.7  RESPUESTAS DUPLICADAS DE LA IA EN WHATSAPP
+     El servidor confirmaba a Meta DESPUES de llamar a OpenAI. Si tardaba mas
+     de la cuenta, Meta reenviaba el mismo mensaje y la IA respondia dos veces,
+     cobrando dos llamadas.
+     Ahora responde 200 de inmediato y procesa despues.
+
+3.8  DOS CAIDAS TOTALES POR DEPENDENCIAS EXTERNAS
+     StorageService creaba el cliente de Supabase en el constructor, y
+     AiService el de OpenAI. Si cualquiera de los dos lanzaba una excepcion,
+     Nest no podia instanciar el modulo y se caia la aplicacion ENTERA: login,
+     CRM, inventario, todo.
+
+     Esto ocurrio de verdad en el primer despliegue:
+
+         Error: Node.js detected but native WebSocket not found.
+           at new RealtimeClient (...)
+           at new StorageService (dist/storage/storage.service.js:26)
+         ==> Exited with status 1
+
+     @supabase/supabase-js necesita el WebSocket global, que no existe hasta
+     Node 22. En local no se noto porque ahi corre Node 24.
+
+     Ahora ambos clientes se crean al primer uso. Un fallo de almacenamiento o
+     de OpenAI degrada solo esa funcion concreta, y devuelve un error util en
+     vez de impedir el arranque.
+
+     OJO: este arreglo esta en la rama, NO en produccion. La caida se resolvio
+     subiendo NODE_VERSION a 22 a mano en Render. Ver seccion 15.
+
+3.9  TELEFONOS DUPLICADOS CON DISTINTO FORMATO
+     "+591 700-11223" y "59170011223" se guardaban como dos clientes distintos.
+     Ahora se normaliza a solo digitos antes de guardar.
+
+3.10 EFECTOS DE REACT QUE LEIAN localStorage
+     El codigo original usaba setTimeout(..., 0) dentro de useEffect para
+     esquivar el aviso del compilador de React sobre setState en efectos.
+     Sustituido por useSyncExternalStore, que es el mecanismo previsto para
+     estado externo a React y ademas resuelve bien la hidratacion en servidor.
+
+
+================================================================================
+4. CAMBIOS DE ARQUITECTURA
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1  DE DOS SERVICIOS A UNO
+--------------------------------------------------------------------------------
+
+Peticion expresa: manejar todo en un unico Web Service de Render.
+
+COMO FUNCIONA
+  El frontend se compila a HTML estatico (output: "export" en next.config.ts) y
+  NestJS lo sirve desde frontend/out como archivos estaticos.
+
+POR QUE ES VIABLE
+  Las 8 rutas de la aplicacion son estaticas. Cada pagina es "use client" y
+  pide los datos desde el navegador, asi que no hay renderizado en servidor que
+  perder.
+
+VENTAJAS
+  - Un solo servicio en el plan gratuito
+  - Un solo arranque en frio en vez de dos
+  - CORS deja de ser un problema: mismo origen
+  - Una sola URL para todo
+
+DETALLE CRITICO: trailingSlash
+  Sin trailingSlash: true, Next genera un directorio "login/" (con sus payloads
+  internos) JUNTO a "login.html". Cualquier servidor de estaticos entra al
+  directorio, no encuentra index.html dentro y responde 404.
+  Con trailingSlash genera out/login/index.html, que es lo que espera cualquier
+  servidor estatico.
+
+RESOLUCION DE LA CARPETA DEL CLIENTE
+  main.ts calcula la ruta desde __dirname (backend/dist), NO desde
+  process.cwd(), porque Render arranca el proceso desde la raiz del repositorio
+  y cwd no es fiable.
+
+ORDEN DE RUTEO
+  1. Middleware de archivos estaticos, con extensions: ['html']
+  2. Rutas de la API de Nest
+  3. Middleware final: si es GET, acepta text/html y la ruta no empieza por un
+     prefijo de la API, devuelve el 404.html del cliente
+
+  API_PREFIXES = /auth  /clients  /products  /whatsapp  /health  /socket.io
+
+helmet SIN CSP
+  La Content-Security-Policy por defecto de helmet bloquea los scripts que
+  genera Next. Se desactiva solo esa parte; el resto de cabeceras siguen
+  activas.
+
+
+--------------------------------------------------------------------------------
+4.2  CLIENTE HTTP UNICO EN EL FRONTEND
+--------------------------------------------------------------------------------
+
+ANTES
+  La URL "https://cj7-ia.onrender.com" estaba escrita a mano en 13 sitios
+  repartidos por 4 archivos. Era imposible apuntar a un backend local sin
+  editar codigo, y cambiar de dominio significaba tocar 13 lineas.
+
+AHORA
+  frontend/lib/api.ts centraliza todo:
+
+  apiFetch()
+    Anade el Bearer token, serializa JSON o FormData segun corresponda, extrae
+    los mensajes de error de Nest (incluido el ARRAY que devuelve la
+    validacion), y ante un 401 limpia la sesion.
+
+  apiDownload()
+    Descarga archivos protegidos como blob, porque una etiqueta <a href> no
+    puede enviar la cabecera Authorization.
+
+  NEXT_PUBLIC_API_URL vacia significa "mismo origen". Solo hace falta definirla
+  en desarrollo, donde el frontend corre en :3000 y el backend en :8765.
+
+
+--------------------------------------------------------------------------------
+4.3  LA SESION COMO ESTADO EXTERNO DE REACT
+--------------------------------------------------------------------------------
+
+frontend/lib/auth.ts expone el token y el usuario mediante useSyncExternalStore,
+con un conjunto de suscriptores propio mas el evento "storage" del navegador
+(que avisa de cambios hechos en OTRA pestana: si se cierra sesion en una, las
+demas se enteran).
+
+El snapshot se cachea por el texto crudo del localStorage. Esto es obligatorio,
+no una optimizacion: getSnapshot debe devolver la MISMA referencia mientras el
+valor no cambie, o React entra en un bucle infinito de renders.
+
+Esto permite ademas que la redireccion tras un 401 la haga el router de Next en
+vez de window.location: apiFetch solo borra la sesion, el store avisa, y
+app/dashboard/layout.tsx redirige.
+
+
+--------------------------------------------------------------------------------
+4.4  PROTECCION DEL PANEL EN UN SOLO SITIO
+--------------------------------------------------------------------------------
+
+frontend/app/dashboard/layout.tsx cubre /dashboard y todas sus subrutas, asi que
+ninguna pagina tiene que acordarse de comprobar la sesion por su cuenta.
+
+IMPORTANTE: es una comprobacion de EXPERIENCIA DE USUARIO, no de seguridad.
+Quien manda es el JwtAuthGuard del backend. Aunque alguien fuerce la ruta en el
+navegador, no vera ningun dato porque la API rechazara sus peticiones.
+
+
+================================================================================
+5. ESTRUCTURA ACTUAL DEL PROYECTO
+================================================================================
+
+El arbol recoge los archivos con logica y configuracion relevante. Se omiten,
+por ruido, los de herramientas que no se tocaron: .prettierrc, eslint.config.mjs,
+nest-cli.json, skills-lock.json, backend/test/, backend/README.md,
+frontend/README.md, frontend/AGENTS.md, frontend/CLAUDE.md,
+frontend/.vscode/settings.json, frontend/postcss.config.mjs, los tsconfig.json,
+frontend/public/ y los package-lock.json. Total real versionado: 84 archivos.
+
+cj7-ia/
+|
++-- .gitignore                 Raiz. Antes no existia: solo habia uno por
+|                              subcarpeta y nada cubria la raiz del repo.
++-- README.md                  Guia de instalacion, despliegue y migracion.
++-- render.yaml                Blueprint de Render. UN solo servicio.
++-- INFORME-AUDITORIA.txt      Este documento.
+|
++-- backend/                   API NestJS 11 + sirve la aplicacion web
+|   |
+|   +-- .env                   LOCAL, NO se sube (esta en .gitignore)
+|   +-- .env.example           Plantilla documentada, SIN secretos reales
+|   +-- package.json           build ejecuta "prisma generate && nest build"
+|   |                          engines: node >= 22
+|   +-- tsconfig.build.json    Excluye scripts/  (ver bug 3.2)
+|   |
+|   +-- prisma/
+|   |   +-- schema.prisma      Modelo de datos
+|   |
+|   +-- scripts/               Utilidades de mantenimiento, se ejecutan con
+|   |   |                      ts-node y quedan FUERA del build de produccion
+|   |   +-- hash-passwords.ts  Migra contrasenas planas a bcrypt. Idempotente
+|   |   +-- claim-data.ts      Reasigna clientes y productos a una cuenta real
+|   |
+|   +-- src/
+|       +-- main.ts            Arranque: rawBody para la firma de Meta, helmet,
+|       |                      estaticos del cliente, CORS, ValidationPipe
+|       +-- app.module.ts      Modulos + los dos guards globales
+|       +-- app.controller.ts  GET / y GET /health, ambos publicos
+|       +-- app.service.ts
+|       |
+|       +-- common/            [NUEVO] Utilidades compartidas
+|       |   +-- env.ts         requireEnv (falla temprano), optionalEnv, envList
+|       |   +-- csv.ts         Escapado CSV contra inyeccion de formulas
+|       |   +-- errors.ts      describeError: mensaje legible de un unknown
+|       |
+|       +-- prisma/            [NUEVO] Cliente Prisma compartido
+|       |   +-- prisma.service.ts   Extiende PrismaClient, conecta y desconecta
+|       |   +-- prisma.module.ts    @Global
+|       |
+|       +-- auth/
+|       |   +-- auth.service.ts     bcrypt, login con migracion al vuelo,
+|       |   |                       registro con reintento de clientCode
+|       |   +-- auth.controller.ts  POST /login, POST /register, GET /me
+|       |   +-- auth.module.ts      @Global, JWT desde JWT_SECRET
+|       |   +-- dto/auth.dto.ts              [NUEVO] LoginDto, RegisterDto
+|       |   +-- guards/jwt-auth.guard.ts     [NUEVO] Guard global
+|       |   +-- decorators/
+|       |       +-- public.decorator.ts       [NUEVO] @Public()
+|       |       +-- current-user.decorator.ts [NUEVO] @CurrentUser()
+|       |
+|       +-- client/            CRM. Todo filtrado por userId
+|       |   +-- client.service.ts     CRUD, importacion masiva, normalizacion
+|       |   |                         de telefonos
+|       |   +-- client.controller.ts  CRUD + exportacion vCard y CSV
+|       |   +-- dto/client.dto.ts     [NUEVO]
+|       |
+|       +-- product/           Inventario. Todo filtrado por userId
+|       |   +-- product.service.ts     CRUD, con el PUT que faltaba
+|       |   +-- product.controller.ts  multipart, limite de 5 MB
+|       |   +-- dto/product.dto.ts     [NUEVO] Los campos numericos se validan
+|       |                              como texto, porque llegan por
+|       |                              multipart/form-data
+|       |
+|       +-- whatsapp/
+|       |   +-- whatsapp.controller.ts  Solo HTTP: verifica la firma, confirma
+|       |   |                           a Meta de inmediato y delega
+|       |   +-- whatsapp.service.ts     [NUEVO] Toda la logica: firma HMAC,
+|       |                               resolucion del dueno, CRM, IA, envio
+|       |
+|       +-- ai/
+|       |   +-- ai.service.ts   Cliente OpenAI perezoso, prompt endurecido,
+|       |                       max_tokens, formatInventory()
+|       |
+|       +-- storage/
+|       |   +-- storage.service.ts  Cliente Supabase perezoso, validacion de
+|       |                           tipo y tamano, nombres generados por el
+|       |                           servidor
+|       |
+|       +-- events/
+|       |   +-- events.gateway.ts   WebSocket con JWT y salas por usuario
+|       |
+|       +-- queue/             DESACTIVADO (comentado en app.module.ts)
+|           +-- queue.service.ts   BullMQ + Redis. Ya no revienta si falta la
+|                                  configuracion: avisa y se deshabilita
+|
++-- frontend/                  Next.js 16 + React 19 + Tailwind 4
+    |
+    +-- .env.local             LOCAL, NO se sube
+    +-- .env.example           Plantilla
+    +-- next.config.ts         output "export", trailingSlash, imagenes sin
+    |                          optimizar
+    +-- package.json           engines: node >= 22
+    |
+    +-- lib/                   [NUEVO]
+    |   +-- api.ts             Cliente HTTP unico
+    |   +-- auth.ts            Sesion via useSyncExternalStore
+    |
+    +-- app/
+        +-- layout.tsx         Metadatos corregidos (decia "Create Next App"),
+        |                      idioma es
+        +-- page.tsx           Portada
+        +-- login/page.tsx     Ya no trae la contrasena precargada
+        +-- register/page.tsx  Minimo 8 caracteres
+        +-- dashboard/
+            +-- layout.tsx     [NUEVO] Protege todo /dashboard
+            +-- page.tsx       Panel (las metricas siguen siendo de ejemplo)
+            +-- clientes/page.tsx
+            +-- inventario/page.tsx
+            +-- perfil/page.tsx   Lee el perfil real desde /auth/me, con logout
+
+
+================================================================================
+6. MODELO DE DATOS
+================================================================================
+
+CAMBIOS YA APLICADOS A LA BASE DE PRODUCCION
+
+Antes de aplicar nada se previsualizo el SQL con "prisma migrate diff".
+Resultado: CERO operaciones destructivas. Ni DROP TABLE, ni DROP COLUMN, ni
+cambios de tipo. Solo indices y claves foraneas.
+
+  User.role      el valor por defecto pasa de "ADMIN" a "USER"
+  Client.phone   deja de ser @unique global; ahora @@unique([userId, phone])
+  Product.sku    deja de ser @unique global; ahora @@unique([userId, sku])
+  Indices        [userId, createdAt] en Client y Product
+                 [phone, createdAt] en Message
+                 [clientId] en Sale
+  Foraneas       onDelete: Cascade
+
+POR QUE LA UNICIDAD PASA A SER POR CUENTA
+  Con multiples cuentas, que un telefono sea unico en TODA la base significa
+  que si un negocio registra a un cliente, ningun otro negocio puede tenerlo.
+  Dos empresas distintas pueden compartir cliente, y desde luego pueden usar el
+  mismo codigo SKU.
+
+MODELOS
+
+  User      id, email(unico), username(unico), password(hash bcrypt), fullName,
+            gender, clientCode(unico), bio, role, createdAt
+            relaciones: clients[], products[]
+
+  Client    id, name, phone, email, tags[], status, notes, lastContact,
+            createdAt, userId
+            relaciones: user, sales[]
+
+  Product   id, name, description, category, sku, price, offerPrice, cost,
+            stock, minStock, imageUrl, status, createdAt, userId
+            relaciones: user
+
+  Sale      id, total, status, createdAt, clientId
+            relaciones: client
+
+  Message   id, phone, sender("user" o "ai"), content, createdAt
+
+NOTA IMPORTANTE
+  Message NO tiene userId. Los mensajes de WhatsApp no estan aislados por
+  cuenta. Hoy no es un problema porque solo hay un usuario, pero conviene
+  resolverlo antes de abrir el registro a mas negocios.
+
+
+================================================================================
+7. API COMPLETA
+================================================================================
+
+Todo requiere la cabecera  Authorization: Bearer <token>  salvo lo marcado
+como PUBLICO.
+
+  GET     /                       PUBLICO   La aplicacion web. Si no hay
+                                            cliente compilado, devuelve el
+                                            estado en JSON
+  GET     /health                 PUBLICO   Estado. Lo usa Render
+  POST    /auth/register          PUBLICO   3/min. Devuelve token + usuario
+  POST    /auth/login             PUBLICO   5/min. Devuelve token + usuario
+  GET     /auth/me                          Perfil fresco desde la base
+
+  GET     /clients                          Solo los del usuario del token
+  POST    /clients                          Crear
+  PUT     /clients/:id                      Editar
+  DELETE  /clients/:id                      Borrar
+  POST    /clients/import                   Importacion masiva desde texto
+  GET     /clients/export/vcard             Admite ?ids=a,b,c
+  GET     /clients/export/csv               Admite ?ids=a,b,c
+  GET     /clients/:id/vcard                Contacto individual
+
+  GET     /products                         Solo los del usuario del token
+  POST    /products                         multipart/form-data
+  PUT     /products/:id                     multipart/form-data   [NUEVO]
+  DELETE  /products/:id
+
+  GET     /whatsapp/webhook       PUBLICO   Verificacion de Meta
+  POST    /whatsapp/webhook       PUBLICO   Mensajes. Firma verificada. 60/min
+
+FORMATO DE ERROR DE NEST
+
+  { "message": "texto"  |  ["error1","error2"],
+    "error": "Bad Request",
+    "statusCode": 400 }
+
+  La validacion devuelve un ARRAY de mensajes, no una cadena. apiFetch ya
+  contempla ambos casos.
+
+
+================================================================================
+8. VARIABLES DE ENTORNO
+================================================================================
+
+OBLIGATORIA  (el servidor NO arranca sin ella)
+
+  JWT_SECRET                Secreto de firma de los tokens.
+                            Generar con:  openssl rand -base64 48
+
+BASE DE DATOS
+
+  DATABASE_URL              Postgres, a traves del pooler
+  DIRECT_URL                Conexion directa. La usa prisma db push
+
+AUTENTICACION
+
+  JWT_EXPIRES_IN            Por defecto "1d"
+
+OPENAI
+
+  OPENAI_API_KEY            Sin ella el agente responde 503; el resto de la
+                            aplicacion sigue funcionando
+  OPENAI_MODEL              Por defecto "gpt-4o"
+
+SUPABASE STORAGE
+
+  SUPABASE_URL
+  SUPABASE_KEY              La service_role. NUNCA debe aparecer en el frontend
+  SUPABASE_BUCKET           Por defecto "cj7-productos"
+
+WHATSAPP Y META
+
+  WHATSAPP_VERIFY_TOKEN     Debe COINCIDIR con el del panel de Meta
+  META_APP_SECRET           Valida la firma del webhook. Ver seccion 2.6:
+                            un valor INCORRECTO deja mudo al agente
+  META_TOKEN                Token de acceso para enviar mensajes
+  PHONE_NUMBER_ID
+  WHATSAPP_BUSINESS_ACCOUNT_ID
+  APP_ID
+  WHATSAPP_OWNER_EMAIL      Cuenta a la que se asignan los contactos que
+                            entran por WhatsApp. Vacio: la cuenta mas antigua
+
+OTRAS
+
+  NODE_VERSION              "22" COMO MINIMO. Con Node 20,
+                            @supabase/supabase-js falla al arrancar por falta
+                            de WebSocket nativo
+  PORT                      La inyecta Render automaticamente
+  FRONTEND_URLS             Solo si la aplicacion se sirve desde otro dominio.
+                            Con un solo servicio no hace falta
+  REDIS_URL                 URL COMPLETA con credenciales:
+                            rediss://default:TOKEN@host:6379
+                            Vacio: la cola queda deshabilitada
+  NEXT_PUBLIC_API_URL       Solo en DESARROLLO. En produccion se deja SIN
+                            definir, porque es el mismo origen
+
+
+================================================================================
+9. DESPLIEGUE EN RENDER
+================================================================================
+
+CONFIGURACION DEL SERVICIO (pestana Settings)
+
+  Root Directory      (vacio)
+  Build Command       cd frontend && npm ci && npm run build &&
+                      cd ../backend && npm ci && npm run build
+  Start Command       cd backend && npm run start:prod
+  Health Check Path   /health
+
+POR QUE Root Directory VACIO
+  El build tiene que entrar a las DOS carpetas. Con Root Directory en
+  "backend", Render nunca compila el frontend y no hay aplicacion que servir:
+  el servicio arranca, pero solo responde la API.
+
+SECUENCIA DEL BUILD
+  1. frontend: npm ci, next build  ->  genera frontend/out (HTML estatico)
+  2. backend:  npm ci, prisma generate, nest build  ->  genera backend/dist
+  3. arranque: node dist/main, que localiza ../../frontend/out y lo sirve
+
+PLAN GRATUITO
+  El servicio se duerme tras 15 minutos sin trafico y tarda unos 50 segundos en
+  despertar.
+
+  Esto importa al verificar el webhook en Meta: si el servicio esta dormido, la
+  verificacion caduca y parece un problema de token cuando no lo es. Conviene
+  abrir la URL en el navegador antes de pulsar "Verificar y guardar".
+
+
+================================================================================
+10. MIGRACIONES YA EJECUTADAS EN PRODUCCION
+================================================================================
+
+  1. Se previsualizo el SQL con "prisma migrate diff" ANTES de aplicar nada.
+     Resultado: 0 operaciones destructivas.
+
+  2. Se comprobo que no hubiera duplicados que impidieran crear las nuevas
+     claves unicas. Resultado: 0 clientes y 0 productos duplicados.
+
+  3. "prisma db push" aplicado correctamente.
+
+  4. "npm run data:hash-passwords": 1 contrasena hasheada.
+
+  5. "data:claim" NO hizo falta: solo existe una cuenta y todos los datos ya
+     eran suyos.
+
+DATOS CONSERVADOS TRAS LA MIGRACION
+  1 usuario, 3 clientes, 3 productos, 52 mensajes.
+
+
+================================================================================
+11. VERIFICACIONES REALIZADAS
+================================================================================
+
+EN LOCAL, CON EL COMANDO DE BUILD EXACTO DE RENDER Y SIN .env.local
+(para reproducir las condiciones de produccion)
+
+  /                       200  text/html   11 823 bytes
+  /login                  200  text/html   10 947 bytes
+  /register               200  text/html   12 385 bytes
+  /dashboard              200  text/html    8 594 bytes
+  /dashboard/clientes     200  text/html    9 103 bytes
+  /dashboard/perfil       200  text/html    9 098 bytes
+  /no-existe              404  (404 del cliente)
+  assets de _next         200  text/javascript y text/css
+  /health                 200  {"status":"ok"}
+  /clients sin token      401
+
+FLUJO AUTENTICADO COMPLETO
+
+  GET /auth/me    con token valido     200
+  GET /clients    con token valido     200  (3 clientes)
+  GET /products   con token valido     200  (3 productos)
+  export CSV      con token valido     200
+  cualquiera      con token invalido   401
+  cualquiera      sin token            401
+
+FIRMA DEL WEBHOOK DE META
+
+  POST sin firma            403
+  POST con firma falsa      403
+  POST con firma correcta   200  EVENT_RECEIVED
+
+VALIDACION DE ENTRADA
+
+  password de 3 caracteres  400  "La contrasena debe tener al menos 8..."
+  {"role":"ADMIN"}          400  "property role should not exist"
+
+AGENTE DE IA, CON EL INVENTARIO REAL
+
+  Catalogo entregado a la IA:
+    - Polera Basica            250 Bs
+    - Zapatillzas ARG xxi      350 Bs
+    - Zapatillas Nike Air Max  450 Bs
+
+  Cliente: "quiero comprar zapatos Nike"
+
+  IA (2436 ms): "Excelente eleccion! Tenemos las Zapatillas Nike Air Max
+                 disponibles a un precio de 450 Bs. Te gustaria saber mas
+                 sobre ellas o proceder con la compra?"
+
+EN PRODUCCION, TRAS EL DESPLIEGUE
+
+  /                       200  text/html  11 823 bytes  (ya no "Hello World!")
+  /health                 200
+  /clients                401   <- la fuga de datos esta cerrada
+  /products               401
+  /clients/export/csv     401
+
+CALIDAD DEL CODIGO
+
+  backend    tsc --noEmit  limpio     eslint  limpio
+  frontend   tsc --noEmit  limpio     eslint  limpio
+
+
+================================================================================
+12. COMANDOS UTILES
+================================================================================
+
+DESARROLLO
+
+  cd backend  && npm run start:dev      API en :8765
+  cd frontend && npm run dev            Aplicacion en :3000
+                                        (requiere .env.local con
+                                         NEXT_PUBLIC_API_URL=http://localhost:8765)
+
+BASE DE DATOS
+
+  npm run db:push                       Aplica schema.prisma
+  npm run db:studio                     Explorador visual
+
+MANTENIMIENTO
+
+  npm run data:hash-passwords           Migra contrasenas planas. Idempotente
+  npm run data:claim -- correo@x.com    Reasigna datos a una cuenta
+
+CALIDAD
+
+  npm run typecheck                     Disponible en backend y en frontend
+  npm run lint
+
+SIMULAR EL BUILD DE RENDER EN LOCAL
+
+  cd frontend && npm ci && npm run build && cd ../backend && npm ci &&
+  npm run build && npm run start:prod
+
+
+================================================================================
+13. LO QUE QUEDA PENDIENTE
+================================================================================
+
+SEGURIDAD
+
+  - El campo role existe pero NADA lo comprueba. No hay autorizacion por rol:
+    un USER puede exactamente lo mismo que un ADMIN.
+  - El token vive en localStorage, legible por cualquier XSS. Lo correcto seria
+    una cookie httpOnly con SameSite, y refresh tokens.
+  - No hay recuperacion de contrasena.
+  - No hay verificacion de correo: cualquiera puede registrarse con un email
+    que no es suyo.
+  - Message no esta aislado por cuenta (ver seccion 6).
+  - El registro es publico. Si el producto es para un solo negocio, deberia
+    cerrarse o pasar a un sistema de invitaciones.
+
+FUNCIONALIDAD INCOMPLETA (maquetas con datos fijos)
+
+  - Panel: "$12,450", "34 ventas", "82% conversion" estan escritos a mano en el
+    codigo, no salen de la base de datos.
+  - Pipeline de ventas: tarjetas de ejemplo ("Juan Perez", "Ana Lopez").
+  - Modulos Ventas, Meta Ads IA y Analitica: botones sin destino.
+  - El modelo Sale existe en el esquema pero ningun endpoint lo usa.
+  - QueueModule (BullMQ) sigue comentado en app.module.ts.
+  - generateAdImage() esta implementado pero no expuesto en ninguna ruta.
+
+CALIDAD
+
+  - No hay tests. app.controller.spec.ts es el de ejemplo que trae Nest.
+  - tsconfig tiene strictNullChecks: false y noImplicitAny: false.
+  - Prisma 5.22 con la version 8.x ya disponible.
+
+OPERACION
+
+  - Sin logs estructurados ni monitorizacion de errores (Sentry o similar).
+  - Sin copias de seguridad automaticas de la base de datos.
+  - Plan gratuito: el servicio se duerme a los 15 minutos.
+
+DATOS
+
+  - Hay erratas en el catalogo que la IA REPITE literalmente a los clientes,
+    porque tiene instrucciones de no inventarse nada:
+
+        "Zapatillzas ARG xxi"   ->  deberia decir "Zapatillas"
+        "Polera Basica "        ->  sobra un espacio al final
+
+    Se corrigen desde el panel de Inventario.
+
+
+================================================================================
+14. ACCIONES MANUALES PENDIENTES
+================================================================================
+
+0. MERGEAR LOS DOS COMMITS PENDIENTES
+   6f10b63 y f50010d estan solo en la rama seguridad-y-despliegue. Sin ellos,
+   render.yaml sigue diciendo NODE_VERSION "20" y los clientes de Supabase y
+   OpenAI se siguen creando en el constructor. Ver seccion 15.
+   https://github.com/hugogarcia-art/Cj7-IA/compare/main...seguridad-y-despliegue
+
+1. REVOCAR EL TOKEN DE GITHUB
+   El remote de git tenia un Personal Access Token incrustado en texto plano
+   dentro de .git/config. Ya se limpio la URL local, pero el token SIGUE SIENDO
+   VALIDO hasta que se revoque a mano.
+   GitHub -> Settings -> Developer settings -> Personal access tokens
+
+2. ROTAR LAS CLAVES DE API
+   OPENAI_API_KEY y SUPABASE_KEY se compartieron en texto plano durante la
+   sesion de trabajo. Conviene regenerarlas.
+
+3. IGUALAR EL VERIFY TOKEN CON META
+   En Render esta el valor nuevo; en Meta seguia el viejo. No rompe la entrega
+   de mensajes hoy, pero fallara el dia que se vuelva a guardar la
+   configuracion del webhook.
+   Meta -> WhatsApp -> Configuracion -> Webhook -> Editar
+   Comprobar despues que el campo "messages" siga suscrito.
+
+4. PONER EL META_APP_SECRET REAL
+   Mientras este vacio, el webhook acepta peticiones de cualquiera.
+   Meta -> Configuracion -> Basica -> Clave secreta de la aplicacion
+   CUIDADO: un valor incorrecto deja mudo al agente. Ver seccion 2.6.
+
+5. CORREGIR LAS ERRATAS DEL CATALOGO
+   Ver seccion 13.
+
+
+================================================================================
+15. HISTORIAL DE COMMITS
+================================================================================
+
+ATENCION: la rama y main NO estan al mismo nivel.
+
+  main                       24a4c6b (merge) -> 0101a2e -> 23041f1 -> 7a5c65e
+  seguridad-y-despliegue     f50010d -> 6f10b63 -> 0101a2e -> ...
+
+  Los commits 6f10b63 y f50010d estan SOLO en la rama. Produccion corre el
+  codigo de 0101a2e.
+
+Base: 7a5c65e "URLs de produccion conectadas al backend de Render"
+
+
+EN MAIN Y DESPLEGADOS
+---------------------
+
+  23041f1  Auditoria de seguridad: autenticacion real, aislamiento por cuenta
+           y despliegue
+           53 archivos. bcrypt, JWT desde el entorno, guard global, aislamiento
+           por cuenta, firma del webhook, CORS cerrado, validacion, rate
+           limiting, el PUT de productos que faltaba, Prisma singleton,
+           escapado CSV, .gitignore, .env.example, render.yaml y README.
+
+  0101a2e  Servir la aplicacion web y la API desde un unico servicio
+           9 archivos. output "export", trailingSlash, estaticos servidos desde
+           NestJS, helmet sin CSP, NEXT_PUBLIC_API_URL vacia = mismo origen.
+
+  24a4c6b  Merge de la pull request #1 hacia main.
+
+
+EN LA RAMA, PENDIENTES DE MERGEAR
+---------------------------------
+
+  6f10b63  Arreglar el arranque en Render: Node 22 y cliente de Supabase
+           perezoso
+           7 archivos. NODE_VERSION "22" en render.yaml, engines >= 22 en los
+           dos package.json, y el cliente de Supabase creado al primer uso en
+           vez de en el constructor.
+
+  f50010d  Crear el cliente de OpenAI al primer uso, no al arrancar
+           1 archivo. Mismo defecto que el commit anterior, esta vez en
+           AiService.
+
+
+POR QUE PRODUCCION FUNCIONA IGUAL
+
+  La caida del primer despliegue se resolvio cambiando NODE_VERSION a 22 A MANO
+  en el panel de Render, no desplegando el arreglo de codigo. Con Node 22, el
+  cliente de Supabase ya no lanza al construirse, asi que el servicio arranca
+  aunque siga creandose en el constructor.
+
+QUE APORTAN LOS DOS COMMITS PENDIENTES
+
+  Son robustez, no funcionalidad. Hoy no se echan en falta, pero:
+
+  - render.yaml sigue diciendo NODE_VERSION "20". Si alguien recrea el servicio
+    desde el blueprint, o alguien borra la variable del panel, vuelve la misma
+    caida.
+  - Los engines de package.json siguen declarando >= 20, que es incorrecto y
+    engana a quien clone el repositorio.
+  - Sin los clientes perezosos, un fallo de Supabase o de OpenAI (una clave mal
+    puesta, un corte del proveedor) tumba la aplicacion ENTERA en vez de
+    degradar solo esa funcion.
+
+  Recomendacion: mergearlos. No cambian el comportamiento visible.
+
+
+================================================================================
+FIN DEL INFORME
+================================================================================

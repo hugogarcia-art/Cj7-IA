@@ -95,4 +95,36 @@ export class StorageService {
 
     return supabase.storage.from(this.bucket).getPublicUrl(path).data.publicUrl;
   }
+
+  /**
+   * Borra una imagen a partir de su URL publica.
+   *
+   * Se usa para limpiar cuando la escritura en base de datos falla despues de
+   * haber subido el archivo, y para no acumular la imagen antigua de un
+   * producto al reemplazarla. Es best-effort: si falla, se registra y ya, no
+   * tiene sentido tumbar la operacion principal por un archivo huerfano.
+   */
+  async removeImage(publicUrl: string): Promise<void> {
+    const marker = `/object/public/${this.bucket}/`;
+    const index = publicUrl.indexOf(marker);
+    if (index === -1) return;
+
+    const path = publicUrl.slice(index + marker.length);
+    if (!path) return;
+
+    try {
+      const { error } = await this.getClient()
+        .storage.from(this.bucket)
+        .remove([path]);
+      if (error) {
+        this.logger.warn(
+          `No se pudo borrar la imagen ${path}: ${error.message}`,
+        );
+      }
+    } catch (error: unknown) {
+      this.logger.warn(
+        `No se pudo borrar la imagen ${path}: ${describeError(error)}`,
+      );
+    }
+  }
 }
