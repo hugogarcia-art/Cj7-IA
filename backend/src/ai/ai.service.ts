@@ -4,7 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { OpenAI } from 'openai';
-import { optionalEnv, requireEnv } from '../common/env';
+import { optionalEnv } from '../common/env';
 import { describeError } from '../common/errors';
 
 const MAX_INVENTORY_ITEMS = 10;
@@ -13,10 +13,31 @@ const MAX_INVENTORY_ITEMS = 10;
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly model = optionalEnv('OPENAI_MODEL', 'gpt-4o');
-  private readonly openai: OpenAI;
+  private client: OpenAI | null = null;
 
-  constructor() {
-    this.openai = new OpenAI({ apiKey: requireEnv('OPENAI_API_KEY') });
+  /**
+   * Igual que en StorageService: el cliente se crea al primer uso.
+   *
+   * Construirlo en el constructor hace que una clave ausente impida a Nest
+   * instanciar el modulo y tumbe el servicio entero. Sin OpenAI la app deberia
+   * seguir sirviendo el CRM y el inventario; lo unico que no funciona es el
+   * agente de WhatsApp.
+   */
+  private getClient(): OpenAI {
+    if (this.client) return this.client;
+
+    const apiKey = optionalEnv('OPENAI_API_KEY');
+    if (!apiKey) {
+      this.logger.error(
+        'OPENAI_API_KEY sin configurar: el agente de IA no puede responder.',
+      );
+      throw new ServiceUnavailableException(
+        'El asistente no esta configurado en este momento.',
+      );
+    }
+
+    this.client = new OpenAI({ apiKey });
+    return this.client;
   }
 
   // Módulo 1: Agente IA WhatsApp
@@ -42,7 +63,7 @@ export class AiService {
     ].join('\n');
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.getClient().chat.completions.create({
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -70,7 +91,7 @@ export class AiService {
   // Módulo 7: Generador de Imágenes IA
   async generateAdImage(prompt: string): Promise<string> {
     try {
-      const response = await this.openai.images.generate({
+      const response = await this.getClient().images.generate({
         model: 'dall-e-3',
         prompt: `Imagen publicitaria profesional, estilo minimalista, fondo limpio, iluminación de estudio: ${prompt}`,
         n: 1,
