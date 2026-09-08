@@ -1,4 +1,5 @@
-import { Transform } from 'class-transformer';
+/* eslint-disable @typescript-eslint/no-unsafe-call -- class-validator decorators are typed dynamically. */
+import { Transform, type TransformFnParams } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -23,9 +24,18 @@ export const CLIENT_STATUSES = ['Nuevo', 'En Proceso', 'VIP', 'Inactivo'];
  * rechaza, cuando la intencion era justamente no poner correo.
  */
 const EmptyToUndefined = () =>
-  Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' && value.trim() === '' ? undefined : value,
-  );
+  Transform(({ value }: TransformFnParams): string | undefined => {
+    if (value == null) {
+      return undefined;
+    }
+
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalized = value.trim();
+    return normalized === '' ? undefined : normalized;
+  });
 
 export class CreateClientDto {
   @IsString()
