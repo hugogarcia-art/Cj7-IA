@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot, Users, Plus, ArrowLeft, Phone, Mail, X, Pencil, Trash2, Search, Smartphone, Upload, Download, FileSpreadsheet } from "lucide-react";
+import { apiDownload, apiFetch } from "@/lib/api";
 
 type Client = {
   id: string;
@@ -28,16 +29,10 @@ export default function ClientesPage() {
   const [formData, setFormData] = useState({ name: "", phone: "", email: "", status: "Nuevo", tags: "", notes: "" });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-    const fetchClients = useCallback(async () => {
+  const fetchClients = useCallback(async () => {
     try {
-      const res = await fetch("https://cj7-ia.onrender.com/clients");
-      const data = await res.json();
-      // Validación: Si la respuesta es un arreglo, lo guardamos. Si no, mostramos arreglo vacío.
-      if (Array.isArray(data)) {
-        setClients(data);
-      } else {
-        setClients([]);
-      }
+      const data = await apiFetch<Client[]>("/clients");
+      setClients(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error al cargar clientes:", error);
       setClients([]);
@@ -87,10 +82,11 @@ export default function ClientesPage() {
   const handleDelete = async (id: string) => {
     if (window.confirm("¿Seguro que quieres eliminar este cliente?")) {
       try {
-        await fetch(`https://cj7-ia.onrender.com/clients/${id}`, { method: "DELETE" });
-        fetchClients();
+        await apiFetch(`/clients/${id}`, { method: "DELETE" });
+        setSelectedIds((prev) => prev.filter((x) => x !== id));
+        void fetchClients();
       } catch (error) {
-        console.error("Error al eliminar:", error);
+        alert(error instanceof Error ? error.message : "Error al eliminar.");
       }
     }
   };
@@ -101,48 +97,34 @@ export default function ClientesPage() {
     const payload = { ...formData, tags: tagsArray };
 
     try {
-      const url = editingClient ? `https://cj7-ia.onrender.com/clients/${editingClient.id}` : "https://cj7-ia.onrender.com/clients";
-      const method = editingClient ? "PUT" : "POST";
-
-      const res = await fetch(url, {
-        method: method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        alert(errorData.message || "Ocurrió un error al guardar el cliente.");
-        return;
-      }
+      await apiFetch(
+        editingClient ? `/clients/${editingClient.id}` : "/clients",
+        { method: editingClient ? "PUT" : "POST", body: payload },
+      );
 
       setIsModalOpen(false);
-      fetchClients();
+      void fetchClients();
     } catch (error) {
-      console.error("Error al guardar cliente:", error);
-      alert("Error de red al conectar con el servidor.");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Ocurrió un error al guardar el cliente.",
+      );
     }
   };
 
-    const handleImport = async () => {
+  const handleImport = async () => {
     try {
-      const res = await fetch("https://cj7-ia.onrender.com/clients/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawText: importText }),
-      });
+      const data = await apiFetch<{
+        imported: number;
+        skipped: number;
+        errors: number;
+      }>("/clients/import", { method: "POST", body: { rawText: importText } });
 
-      if (!res.ok) {
-        alert("Error al importar contactos.");
-        return;
-      }
-
-      const data = await res.json();
       setImportResult(data);
-      fetchClients(); // Recarga la tabla con los nuevos
+      void fetchClients(); // Recarga la tabla con los nuevos
     } catch (error) {
-      console.error("Error al importar:", error);
-      alert("Error de red al importar.");
+      alert(error instanceof Error ? error.message : "Error al importar.");
     }
   };
 
@@ -159,9 +141,33 @@ export default function ClientesPage() {
       setSelectedIds(filteredClients.map((c) => c.id));
     }
   };
-  const idsQuery = selectedIds.length > 0 ? `?ids=${selectedIds.join(',')}` : '';
-  const vcardExportUrl = `https://cj7-ia.onrender.com/clients/export/vcard${idsQuery}`;
-  const csvExportUrl = `https://cj7-ia.onrender.com/clients/export/csv${idsQuery}`;
+  const idsQuery = selectedIds.length > 0 ? `?ids=${selectedIds.join(",")}` : "";
+  const today = new Date().toISOString().split("T")[0];
+
+  // Las descargas van por fetch (no por <a href>) porque necesitan el header
+  // Authorization, que un enlace normal no puede enviar.
+  const handleExport = async (format: "vcard" | "csv") => {
+    const extension = format === "vcard" ? "vcf" : "csv";
+    try {
+      await apiDownload(
+        `/clients/export/${format}${idsQuery}`,
+        `contactos-cj7-${today}.${extension}`,
+      );
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo exportar.");
+    }
+  };
+
+  const handleDownloadVCard = async (client: Client) => {
+    try {
+      await apiDownload(
+        `/clients/${client.id}/vcard`,
+        `${client.name.replace(/[^\w.-]+/g, "_")}.vcf`,
+      );
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo descargar.");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-soft p-4 md:p-8 relative">
@@ -177,21 +183,19 @@ export default function ClientesPage() {
           <p className="text-gray-500 mt-1">Gestiona, edita y segmenta tus clientes.</p>
         </div>
         <div className="flex gap-2">
-          <a 
-            href={vcardExportUrl} 
-            download
+          <button
+            onClick={() => void handleExport("vcard")}
             className="border border-primary text-primary px-6 py-3 rounded-xl hover:bg-primary/10 transition-transform font-medium text-sm flex items-center gap-2"
           >
-            <Download size={18} /> {selectedIds.length > 0 ? `Exportar (${selectedIds.length})` : 'Exportar Todos'}
-          </a>
-          <a 
-            href={csvExportUrl} 
-            download
+            <Download size={18} /> {selectedIds.length > 0 ? `Exportar (${selectedIds.length})` : "Exportar Todos"}
+          </button>
+          <button
+            onClick={() => void handleExport("csv")}
             title="Descargar CSV para Excel"
             className="border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-transform font-medium text-sm flex items-center gap-2"
           >
             <FileSpreadsheet size={18} /> CSV
-          </a>
+          </button>
           <button onClick={() => setIsImportOpen(true)} className="border border-primary text-primary px-6 py-3 rounded-xl hover:bg-primary/10 transition-transform font-medium text-sm flex items-center gap-2">
             <Upload size={18} /> Importar
           </button>
@@ -242,8 +246,8 @@ export default function ClientesPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredClients.map((client, i) => (
-                <motion.tr key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="border-b border-gray-200/30 dark:border-gray-700/30 hover:bg-primary/5">
+              {filteredClients.map((client) => (
+                <motion.tr key={client.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="border-b border-gray-200/30 dark:border-gray-700/30 hover:bg-primary/5">
                   <td className="py-4 px-4">
                     <input
                       type="checkbox"
@@ -264,16 +268,23 @@ export default function ClientesPage() {
                       ))}
                     </div>
                   </td>
+                  <td className="py-4 px-4">
+                    <span className="px-2 py-1 rounded-md bg-gray-500/10 text-gray-600 dark:text-gray-300 text-xs font-medium">
+                      {client.status || "Nuevo"}
+                    </span>
+                  </td>
+                  <td className="py-4 px-4 text-gray-500 text-sm">
+                    {new Date(client.createdAt).toLocaleDateString("es-BO")}
+                  </td>
                   <td className="py-4 px-4 text-right">
                     <div className="flex justify-end gap-2">
-                      <a 
-                        href={`https://cj7-ia.onrender.com/clients/${client.id}/vcard`} 
-                        download
+                      <button
+                        onClick={() => void handleDownloadVCard(client)}
                         title="Guardar en mi celular"
                         className="p-2 text-gray-400 hover:text-green-600 transition-colors"
                       >
                         <Smartphone size={16} />
-                      </a>
+                      </button>
                       <button onClick={() => openEditModal(client)} className="p-2 text-gray-400 hover:text-primary transition-colors">
                         <Pencil size={16} />
                       </button>

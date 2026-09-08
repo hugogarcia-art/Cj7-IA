@@ -1,0 +1,58 @@
+# Blueprint de Render — https://render.com/docs/blueprint-spec
+#
+# UN SOLO servicio sirve la aplicación web y la API.
+#
+# El frontend se compila como HTML estático (`output: "export"` en
+# next.config.ts) y NestJS lo sirve desde frontend/out. Como todo vive en el
+# mismo origen, no hay CORS que configurar ni un segundo servicio que despertar.
+#
+# Los valores con `sync: false` NO se guardan aquí: los pegas una sola vez en
+# el panel de Render (Environment) y quedan cifrados fuera del repositorio.
+
+services:
+  - type: web
+    name: cj7-ia
+    runtime: node
+    plan: free
+    region: oregon
+    # Sin rootDir: el build necesita entrar a frontend/ y a backend/.
+    buildCommand: >-
+      cd frontend && npm ci && npm run build &&
+      cd ../backend && npm ci && npm run build
+    startCommand: cd backend && npm run start:prod
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Render inyecta PORT automáticamente; main.ts lo respeta.
+      - key: JWT_SECRET
+        generateValue: true # Render genera un secreto aleatorio la 1ª vez
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: cj7-productos
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_TOKEN
+        sync: false
+      - key: PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_OWNER_EMAIL
+        sync: false
+      # FRONTEND_URLS solo hace falta si algun dia sirves la aplicacion desde
+      # otro dominio. Sirviendola desde aqui, no se usa.

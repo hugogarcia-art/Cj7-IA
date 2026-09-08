@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Bot, Lock, Mail, User, ArrowLeft } from "lucide-react";
+import { apiFetch } from "@/lib/api";
+import { saveSession, type SessionUser } from "@/lib/auth";
 
 export default function RegisterPage() {
   const [username, setUsername] = useState("");
@@ -12,35 +14,35 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    
+
+    if (password.length < 8) {
+      setError("La contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await fetch("https://cj7-ia.onrender.com/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password, fullName, gender }),
-      });
+      const data = await apiFetch<{ access_token: string; user: SessionUser }>(
+        "/auth/register",
+        {
+          method: "POST",
+          body: { username, email, password, fullName, gender },
+          auth: false,
+        },
+      );
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "Error al registrarse");
-      }
-
-      // Guardamos el token y vamos al Dashboard
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      saveSession(data.access_token, data.user);
       router.push("/dashboard");
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Error al registrarse");
-      }
+      setError(err instanceof Error ? err.message : "Error al registrarse");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -124,8 +126,9 @@ export default function RegisterPage() {
                 required 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                minLength={8}
                 className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder="••••••••"
+                placeholder="Mínimo 8 caracteres"
               />
             </div>
           </div>
@@ -134,9 +137,10 @@ export default function RegisterPage() {
 
           <button 
             type="submit" 
-            className="w-full bg-primary text-white py-3 rounded-xl shadow-glow hover:scale-105 transition-transform font-medium mt-4"
+            disabled={loading}
+            className="w-full bg-primary text-white py-3 rounded-xl shadow-glow hover:scale-105 transition-transform font-medium mt-4 disabled:opacity-60 disabled:hover:scale-100"
           >
-            Registrarse
+            {loading ? "Creando cuenta..." : "Registrarse"}
           </button>
         </form>
 
