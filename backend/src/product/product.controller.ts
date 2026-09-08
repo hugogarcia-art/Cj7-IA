@@ -22,6 +22,8 @@ import {
   type UploadedImage,
 } from '../storage/storage.service';
 
+// Nest ya traduce los errores de multer a HttpException, asi que pasarse del
+// limite devuelve un 413 "File too large" y no un 500. No hace falta filtro.
 const imageUpload = FileInterceptor('file', {
   limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
 });

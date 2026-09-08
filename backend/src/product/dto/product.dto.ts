@@ -1,11 +1,27 @@
+import { Transform } from 'class-transformer';
 import {
   IsIn,
   IsNumberString,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
+
+/**
+ * Recorta espacios ANTES de validar.
+ *
+ * Sin esto, un nombre de "   " pasa @MinLength(1) porque son tres caracteres,
+ * y luego se guarda como cadena vacia. Lo mismo con el SKU.
+ */
+const Trim = () =>
+  Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  );
+
+/** Los enteros del formulario no admiten decimales ni signo. */
+const INTEGER = /^[0-9]+$/;
 
 /**
  * El formulario del frontend viaja como multipart/form-data (lleva la imagen),
@@ -13,6 +29,7 @@ import {
  * numéricos y los convertimos en el servicio.
  */
 export class CreateProductDto {
+  @Trim()
   @IsString()
   @MinLength(1, { message: 'El nombre es obligatorio.' })
   @MaxLength(150)
@@ -28,6 +45,7 @@ export class CreateProductDto {
   @MaxLength(80)
   category?: string;
 
+  @Trim()
   @IsString()
   @MinLength(1, { message: 'El SKU es obligatorio.' })
   @MaxLength(60)
@@ -45,11 +63,11 @@ export class CreateProductDto {
   cost?: string;
 
   @IsOptional()
-  @IsNumberString({}, { message: 'El stock debe ser un número.' })
+  @Matches(INTEGER, { message: 'El stock debe ser un número entero.' })
   stock?: string;
 
   @IsOptional()
-  @IsNumberString({}, { message: 'El stock mínimo debe ser un número.' })
+  @Matches(INTEGER, { message: 'El stock mínimo debe ser un número entero.' })
   minStock?: string;
 
   @IsOptional()
@@ -58,8 +76,10 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+  @Trim()
   @IsOptional()
   @IsString()
+  @MinLength(1, { message: 'El nombre no puede quedar vacío.' })
   @MaxLength(150)
   name?: string;
 
@@ -73,8 +93,10 @@ export class UpdateProductDto {
   @MaxLength(80)
   category?: string;
 
+  @Trim()
   @IsOptional()
   @IsString()
+  @MinLength(1, { message: 'El SKU no puede quedar vacío.' })
   @MaxLength(60)
   sku?: string;
 
@@ -91,11 +113,11 @@ export class UpdateProductDto {
   cost?: string;
 
   @IsOptional()
-  @IsNumberString({}, { message: 'El stock debe ser un número.' })
+  @Matches(INTEGER, { message: 'El stock debe ser un número entero.' })
   stock?: string;
 
   @IsOptional()
-  @IsNumberString({}, { message: 'El stock mínimo debe ser un número.' })
+  @Matches(INTEGER, { message: 'El stock mínimo debe ser un número entero.' })
   minStock?: string;
 
   @IsOptional()
