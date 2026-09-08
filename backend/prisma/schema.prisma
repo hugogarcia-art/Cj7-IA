@@ -9,33 +9,38 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  username  String   @unique
-  password  String
-  fullName    String?  // <-- NUEVO: Nombre completo
-  gender      String?  // <-- NUEVO: Sexo (Male/Female/Other)
-  clientCode  Int      @unique
-  bio         String?  // <-- NUEVO: Biografía o descripción
-  role      String   @default("ADMIN")
-  createdAt DateTime @default(now())
-  clients   Client[]
-  products  Product[]
+  id         String    @id @default(uuid())
+  email      String    @unique
+  username   String    @unique
+  /// Hash bcrypt. Nunca la contraseña en claro.
+  password   String
+  fullName   String?
+  gender     String?
+  clientCode Int       @unique
+  bio        String?
+  role       String    @default("USER")
+  createdAt  DateTime  @default(now())
+  clients    Client[]
+  products   Product[]
 }
 
 model Client {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
-  phone       String   @unique
+  /// Solo dígitos. Único por cuenta, no a nivel global.
+  phone       String
   email       String?
   tags        String[]
-  status      String   @default("Nuevo")
-  notes       String?  // <-- NUEVO: Observaciones
-  lastContact DateTime? // <-- NUEVO: Último contacto
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id])
+  status      String    @default("Nuevo")
+  notes       String?
+  lastContact DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String
   sales       Sale[]
+
+  @@unique([userId, phone])
+  @@index([userId, createdAt])
 }
 
 model Product {
@@ -43,7 +48,8 @@ model Product {
   name        String
   description String?
   category    String?
-  sku         String   @unique
+  /// Único por cuenta: dos negocios pueden usar el mismo SKU.
+  sku         String
   price       Float
   offerPrice  Float?
   cost        Float?
@@ -52,8 +58,11 @@ model Product {
   imageUrl    String?
   status      String   @default("Activo")
   createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String
+
+  @@unique([userId, sku])
+  @@index([userId, createdAt])
 }
 
 model Sale {
@@ -61,14 +70,18 @@ model Sale {
   total     Float
   status    String   @default("Pendiente")
   createdAt DateTime @default(now())
-  client    Client   @relation(fields: [clientId], references: [id])
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   clientId  String
+
+  @@index([clientId])
 }
 
 model Message {
   id        String   @id @default(uuid())
   phone     String
-  sender    String   // "user" o "ai"
+  sender    String // "user" o "ai"
   content   String
   createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
 }

@@ -3,6 +3,6 @@ import { StorageService } from './storage.service';
 
 @Module({
   providers: [StorageService],
-  exports: [StorageService], // Lo exportamos para usarlo en Inventario después
+  exports: [StorageService],
 })
 export class StorageModule {}

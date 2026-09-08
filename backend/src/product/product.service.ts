@@ -1,79 +1,149 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { StorageService } from '../storage/storage.service';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { StorageService, type UploadedImage } from '../storage/storage.service';
+import type { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 
-interface ProductData {
-  name: string;
-  description?: string;
-  category?: string;
-  sku?: string;
-  price: string;
-  offerPrice?: string;
-  cost?: string;
-  stock?: string;
-  minStock?: string;
-  status?: string;
+function toFloat(value: string | undefined): number | null {
+  if (value === undefined || value === '') return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toInt(value: string | undefined): number | null {
+  if (value === undefined || value === '') return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 @Injectable()
-export class ProductService implements OnModuleInit {
-  private prisma = new PrismaClient();
+export class ProductService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
+  ) {}
 
-  constructor(private readonly storageService: StorageService) {}
-
-  async onModuleInit() {
-    await this.prisma.$connect();
-  }
-
-  async getProducts() {
+  getProducts(userId: string) {
     return this.prisma.product.findMany({
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async createProduct(
-    data: ProductData,
-    file: { buffer: Buffer; mimetype: string } | undefined,
+    userId: string,
+    data: CreateProductDto,
+    file: UploadedImage | undefined,
   ) {
-    // Buscamos o creamos el usuario admin para vincular el producto
-    let adminUser = await this.prisma.user.findFirst();
-    if (!adminUser) {
-      adminUser = await this.prisma.user.create({
+    const price = toFloat(data.price);
+    if (price === null || price < 0) {
+      throw new BadRequestException('El precio no es válido.');
+    }
+
+    const imageUrl = file
+      ? await this.storageService.uploadImage(file, userId)
+      : undefined;
+
+    try {
+      return await this.prisma.product.create({
         data: {
-          username: 'admin',
-          email: 'admin@cj7ia.com',
-          password: 'password_seguro_123',
-          clientCode: 0,
+          name: data.name,
+          description: data.description,
+          category: data.category,
+          sku: data.sku,
+          price,
+          offerPrice: toFloat(data.offerPrice),
+          cost: toFloat(data.cost),
+          stock: toInt(data.stock) ?? 0,
+          minStock: toInt(data.minStock) ?? 0,
+          imageUrl,
+          status: data.status ?? 'Activo',
+          userId,
         },
       });
+    } catch (error: unknown) {
+      if (isUniqueConstraintError(error)) {
+        throw new BadRequestException('Ya tienes un producto con ese SKU.');
+      }
+      throw error;
     }
+  }
 
-    // Si viene una imagen, la subimos a Supabase
-    let imageUrl: string | undefined = undefined;
-    if (file) {
-      const fileName = `producto-${Date.now()}.jpg`;
-      imageUrl = await this.storageService.uploadImage(file, fileName);
-    }
-
-    return this.prisma.product.create({
-      data: {
-        name: data.name,
-        description: data.description,
-        category: data.category,
-        sku: data.sku,
-        price: parseFloat(data.price),
-        offerPrice: data.offerPrice ? parseFloat(data.offerPrice) : null,
-        cost: data.cost ? parseFloat(data.cost) : null,
-        stock: parseInt(data.stock) || 0,
-        minStock: parseInt(data.minStock) || 0,
-        imageUrl: imageUrl,
-        status: data.status || 'Activo',
-        userId: adminUser.id,
-      },
+  async updateProduct(
+    userId: string,
+    id: string,
+    data: UpdateProductDto,
+    file: UploadedImage | undefined,
+  ) {
+    const existing = await this.prisma.product.findFirst({
+      where: { id, userId },
+      select: { id: true },
     });
+    if (!existing) throw new NotFoundException('Producto no encontrado');
+
+    if (data.price !== undefined) {
+      const price = toFloat(data.price);
+      if (price === null || price < 0) {
+        throw new BadRequestException('El precio no es válido.');
+      }
+    }
+
+    // Solo reemplazamos la imagen si suben una nueva; si no, se conserva.
+    const imageUrl = file
+      ? await this.storageService.uploadImage(file, userId)
+      : undefined;
+
+    try {
+      return await this.prisma.product.update({
+        where: { id },
+        data: {
+          name: data.name,
+          description: data.description,
+          category: data.category,
+          sku: data.sku,
+          price: data.price !== undefined ? toFloat(data.price) : undefined,
+          offerPrice:
+            data.offerPrice !== undefined
+              ? toFloat(data.offerPrice)
+              : undefined,
+          cost: data.cost !== undefined ? toFloat(data.cost) : undefined,
+          stock:
+            data.stock !== undefined ? (toInt(data.stock) ?? 0) : undefined,
+          minStock:
+            data.minStock !== undefined
+              ? (toInt(data.minStock) ?? 0)
+              : undefined,
+          imageUrl,
+          status: data.status,
+        },
+      });
+    } catch (error: unknown) {
+      if (isUniqueConstraintError(error)) {
+        throw new BadRequestException('Ya tienes un producto con ese SKU.');
+      }
+      throw error;
+    }
   }
 
-  async deleteProduct(id: string) {
-    return this.prisma.product.delete({ where: { id } });
+  async deleteProduct(userId: string, id: string) {
+    const result = await this.prisma.product.deleteMany({
+      where: { id, userId },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException('Producto no encontrado');
+    }
+    return { deleted: true, id };
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
 }

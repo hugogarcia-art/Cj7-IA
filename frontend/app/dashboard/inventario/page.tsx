@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot, Plus, ArrowLeft, X, Pencil, Trash2, Search, Box, Package, DollarSign, AlertTriangle, ImageIcon } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 type Product = {
   id: string;
@@ -38,8 +39,7 @@ export default function InventarioPage() {
 
   const fetchProducts = useCallback(async () => {
     try {
-      const res = await fetch("https://cj7-ia.onrender.com/products");
-      const data = await res.json();
+      const data = await apiFetch<Product[]>("/products");
       setProducts(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error al cargar productos:", error);
@@ -109,10 +109,10 @@ export default function InventarioPage() {
   const handleDelete = async (id: string) => {
     if (window.confirm("¿Seguro que quieres eliminar este producto?")) {
       try {
-        await fetch(`https://cj7-ia.onrender.com/products/${id}`, { method: "DELETE" });
-        fetchProducts();
+        await apiFetch(`/products/${id}`, { method: "DELETE" });
+        void fetchProducts();
       } catch (error) {
-        console.error("Error al eliminar:", error);
+        alert(error instanceof Error ? error.message : "Error al eliminar.");
       }
     }
   };
@@ -136,24 +136,19 @@ export default function InventarioPage() {
       fd.append("status", formData.status);
       if (selectedFile) fd.append("file", selectedFile);
 
-      const url = editingProduct
-        ? `https://cj7-ia.onrender.com/products/${editingProduct.id}`
-        : "https://cj7-ia.onrender.com/products";
-      const method = editingProduct ? "PUT" : "POST";
-
-      const res = await fetch(url, { method, body: fd });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        alert(errorData?.message || "Ocurrió un error al guardar el producto.");
-        return;
-      }
+      await apiFetch(
+        editingProduct ? `/products/${editingProduct.id}` : "/products",
+        { method: editingProduct ? "PUT" : "POST", body: fd },
+      );
 
       setIsModalOpen(false);
-      fetchProducts();
+      void fetchProducts();
     } catch (error) {
-      console.error("Error al guardar producto:", error);
-      alert("Error de red al conectar con el servidor.");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Ocurrió un error al guardar el producto.",
+      );
     } finally {
       setSaving(false);
     }
@@ -320,7 +315,7 @@ export default function InventarioPage() {
                   <div className="flex items-center gap-4">
                     {imagePreview ? (
                       <div className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
-                        <Image src={imagePreview} alt="Vista previa" fill sizes="80px" className="object-cover" />
+                        <Image src={imagePreview} alt="Vista previa" fill sizes="80px" unoptimized className="object-cover" />
                       </div>
                     ) : (
                       <div className="w-20 h-20 rounded-xl bg-primary/10 text-primary flex items-center justify-center">

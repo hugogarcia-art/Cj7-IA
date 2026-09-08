@@ -3,7 +3,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { User, Mail, Fingerprint, Venus, Bot, LayoutDashboard, Users, ShoppingBag, Box, Megaphone, BarChart3, Settings, Hash } from "lucide-react";
+import { User, Mail, Fingerprint, Venus, Bot, LayoutDashboard, Users, ShoppingBag, Box, Megaphone, BarChart3, Settings, Hash, LogOut } from "lucide-react";
+import { apiFetch } from "@/lib/api";
+import { clearSession, useStoredUser } from "@/lib/auth";
 
 type UserProfile = {
   id: string;
@@ -16,25 +18,27 @@ type UserProfile = {
 };
 
 export default function PerfilPage() {
-  const [user, setUser] = useState<UserProfile | null>(null);
+  // Pintamos al instante lo que hay en localStorage para no dejar la pantalla
+  // en blanco, y lo sustituimos por los datos frescos del servidor en cuanto
+  // llegan (el perfil guardado puede estar desactualizado).
+  const storedUser = useStoredUser();
+  const [freshUser, setFreshUser] = useState<UserProfile | null>(null);
   const router = useRouter();
-  void router;
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-
-    if (!storedUser) {
-      return;
-    }
-
-    const parsedUser = JSON.parse(storedUser) as UserProfile;
-
-    const timeoutId = window.setTimeout(() => {
-      setUser(parsedUser);
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
+    apiFetch<UserProfile>("/auth/me")
+      .then(setFreshUser)
+      .catch((error: unknown) => {
+        console.error("No se pudo actualizar el perfil:", error);
+      });
   }, []);
+
+  const user = freshUser ?? (storedUser as UserProfile | null);
+
+  const handleLogout = () => {
+    clearSession();
+    router.replace("/login");
+  };
 
   if (!user) {
     return <div className="min-h-screen bg-gradient-soft flex items-center justify-center">Cargando...</div>;
@@ -74,9 +78,14 @@ export default function PerfilPage() {
               </button>
             </nav>
           </div>
-          <Link href="/dashboard/perfil" className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary text-white font-medium text-sm">
-            <Settings size={18} /> Mi Perfil
-          </Link>
+          <div className="flex flex-col gap-2">
+            <Link href="/dashboard/perfil" className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary text-white font-medium text-sm">
+              <Settings size={18} /> Mi Perfil
+            </Link>
+            <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 text-red-500 text-sm transition-colors">
+              <LogOut size={18} /> Cerrar sesión
+            </button>
+          </div>
         </div>
       </aside>
 

@@ -4,40 +4,33 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Bot, Lock, Mail, ArrowLeft } from "lucide-react";
+import { apiFetch } from "@/lib/api";
+import { saveSession, type SessionUser } from "@/lib/auth";
 
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState(""); // Antes era email
-  const [password, setPassword] = useState("password_seguro_123");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    
+    setLoading(true);
+
     try {
-      const res = await fetch("https://cj7-ia.onrender.com/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier, password }),
-      });
+      const data = await apiFetch<{ access_token: string; user: SessionUser }>(
+        "/auth/login",
+        { method: "POST", body: { identifier, password }, auth: false },
+      );
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "Error al iniciar sesión");
-      }
-
-      // Guardamos el token en el navegador
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      saveSession(data.access_token, data.user);
       router.push("/dashboard");
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Error al iniciar sesión");
-      }
+      setError(err instanceof Error ? err.message : "Error al iniciar sesión");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -94,11 +87,16 @@ export default function LoginPage() {
 
           <button 
             type="submit" 
-            className="w-full bg-primary text-white py-3 rounded-xl shadow-glow hover:scale-105 transition-transform font-medium mt-4"
+            disabled={loading}
+            className="w-full bg-primary text-white py-3 rounded-xl shadow-glow hover:scale-105 transition-transform font-medium mt-4 disabled:opacity-60 disabled:hover:scale-100"
           >
-            Iniciar Sesión
+            {loading ? "Entrando..." : "Iniciar Sesión"}
           </button>
         </form>
+
+        <p className="text-center text-sm text-gray-500 mt-6">
+          ¿No tienes cuenta? <Link href="/register" className="text-primary font-medium">Regístrate</Link>
+        </p>
       </motion.div>
     </div>
   );

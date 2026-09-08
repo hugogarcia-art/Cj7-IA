@@ -1,152 +1,89 @@
-import { Controller, Post, Get, Body, Query, Res } from '@nestjs/common';
-import type { Response } from 'express'; // Arregla el error TS1272
-import { AiService } from '../ai/ai.service';
-import { PrismaClient } from '@prisma/client';
-
-type WhatsAppWebhookMessage = {
-  from?: string;
-  text?: {
-    body?: string;
-  };
-};
-
-type WhatsAppWebhookValue = {
-  messages?: WhatsAppWebhookMessage[];
-};
-
-type WhatsAppWebhookChange = {
-  value?: WhatsAppWebhookValue;
-};
-
-type WhatsAppWebhookEntry = {
-  changes?: WhatsAppWebhookChange[];
-};
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Headers,
+  Logger,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import type { Request, Response } from 'express';
+import { WhatsAppService } from './whatsapp.service';
+import { Public } from '../auth/decorators/public.decorator';
+import { describeError } from '../common/errors';
 
 type WhatsAppWebhookBody = {
-  entry?: WhatsAppWebhookEntry[];
+  entry?: {
+    changes?: {
+      value?: {
+        messages?: {
+          from?: string;
+          type?: string;
+          text?: { body?: string };
+        }[];
+      };
+    }[];
+  }[];
 };
+
+type RequestWithRawBody = Request & { rawBody?: Buffer };
 
 @Controller('whatsapp')
 export class WhatsAppController {
-  private prisma = new PrismaClient();
+  private readonly logger = new Logger(WhatsAppController.name);
 
-  constructor(private readonly aiService: AiService) {}
+  constructor(private readonly whatsappService: WhatsAppService) {}
 
+  @Public()
   @Get('webhook')
   verifyWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
     @Query('hub.challenge') challenge: string,
     @Res() res: Response,
-  ): any {
-    const verifyToken = 'cj7_ia_token_seguro';
-    if (mode === 'subscribe' && token === verifyToken) {
-      return res.status(200).send(challenge);
+  ): void {
+    const expected = this.whatsappService.verifyToken;
+    if (expected && mode === 'subscribe' && token === expected) {
+      res.status(200).send(challenge);
+      return;
     }
-    return res.sendStatus(403);
+    res.sendStatus(403);
   }
 
+  @Public()
+  // Meta reintenta si tardamos; el límite frena picos que dispararían el gasto
+  // de OpenAI, no el tráfico normal.
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post('webhook')
   async receiveMessage(
+    @Req() req: RequestWithRawBody,
+    @Headers('x-hub-signature-256') signature: string | undefined,
     @Body() body: WhatsAppWebhookBody,
     @Res() res: Response,
-  ): Promise<any> {
+  ): Promise<void> {
+    if (!this.whatsappService.verifySignature(req.rawBody, signature)) {
+      throw new ForbiddenException('Firma inválida');
+    }
+
+    // Respondemos 200 siempre y de inmediato: si Meta no recibe el ACK a
+    // tiempo reintenta el mismo mensaje y la IA contestaría dos veces.
+    res.status(200).send('EVENT_RECEIVED');
+
+    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const phone = message?.from;
+    const text = message?.text?.body;
+    if (!phone || !text) return;
+
     try {
-      const entry = body.entry?.[0]?.changes?.[0]?.value;
-      const message = entry?.messages?.[0];
-
-      if (message?.text?.body) {
-        const userPhone = message.from ?? '';
-        const userMessage = message.text.body;
-
-        if (!userPhone) {
-          return res.status(200).send('EVENT_RECEIVED');
-        }
-
-        console.log(`📞 Mensaje recibido de ${userPhone}: ${userMessage}`);
-        // 0. Guardar/actualizar cliente automáticamente en el CRM (0 clics)
-        let adminUser = await this.prisma.user.findFirst();
-        if (!adminUser) {
-          adminUser = await this.prisma.user.create({
-            data: {
-              username: 'admin',
-              email: 'admin@cj7ia.com',
-              password: 'password_seguro_123',
-              clientCode: 0,
-            },
-          });
-        }
-
-        await this.prisma.client.upsert({
-          where: { phone: userPhone },
-          update: { lastContact: new Date() },
-          create: {
-            name: `Cliente WhatsApp ${userPhone}`,
-            phone: userPhone,
-            userId: adminUser.id,
-          },
-        });
-        console.log(`✅ Cliente guardado/actualizado en el CRM: ${userPhone}`);
-
-        // 1. Guardar mensaje del usuario
-        await this.prisma.message.create({
-          data: { phone: userPhone, sender: 'user', content: userMessage },
-        });
-
-        // 2. Leer inventario de la base de datos
-        const products = await this.prisma.product.findMany({ take: 10 });
-        const inventoryString = products
-          .map((p) => `- ${p.name} (Precio: ${p.price} Bs)`)
-          .join('\n');
-
-        // 3. Generar respuesta con IA
-        const aiResponse = await this.aiService.generateWhatsAppResponse(
-          userMessage,
-          'Cliente Potencial',
-          inventoryString,
-        );
-        console.log(`🤖 Respuesta de la IA: ${aiResponse}`);
-
-        // 4. Guardar respuesta de la IA
-        await this.prisma.message.create({
-          data: { phone: userPhone, sender: 'ai', content: aiResponse },
-        });
-
-        // 5. Enviar respuesta por WhatsApp (Meta API)
-        const sendResponse = await fetch(
-          `https://graph.facebook.com/v20.0/${process.env.PHONE_NUMBER_ID}/messages`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${process.env.META_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              to: userPhone,
-              type: 'text',
-              text: { body: aiResponse },
-            }),
-          },
-        );
-
-        const sendData = (await sendResponse.json()) as {
-          error?: unknown;
-        };
-        if (!sendResponse.ok) {
-          console.error('❌ Meta rechazó el envío:', JSON.stringify(sendData));
-        } else {
-          console.log('📤 Respuesta enviada a WhatsApp correctamente');
-        }
-      }
-
-      return res.status(200).send('EVENT_RECEIVED');
-    } catch (error) {
-      console.error(
-        '❌ Error en webhook:',
-        error instanceof Error ? error.message : String(error),
+      await this.whatsappService.handleIncomingMessage(phone, text);
+    } catch (error: unknown) {
+      this.logger.error(
+        `Error procesando el mensaje de ${phone}: ${describeError(error)}`,
       );
-      return res.status(500).send('Error');
     }
   }
 }

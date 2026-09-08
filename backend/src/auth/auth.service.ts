@@ -1,47 +1,130 @@
 import {
+  BadRequestException,
   Injectable,
   UnauthorizedException,
-  BadRequestException,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcryptjs';
+import { PrismaService } from '../prisma/prisma.service';
+import type { LoginDto, RegisterDto } from './dto/auth.dto';
 
-type AuthUser = {
-  id: string;
-  email: string;
-  username: string | null;
-  password: string;
-  fullName: string | null;
-  gender: string | null;
-  bio: string | null;
-  clientCode: number;
-  role: string;
-};
+const BCRYPT_ROUNDS = 12;
+const FIRST_CLIENT_CODE = 150501;
+
+/** Las contraseñas migradas y nuevas son hashes bcrypt ($2a$/$2b$/$2y$). */
+function isBcryptHash(value: string): boolean {
+  return /^\$2[aby]?\$/.test(value);
+}
 
 @Injectable()
 export class AuthService {
-  private prisma = new PrismaClient();
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+  ) {}
 
-  constructor(private jwtService: JwtService) {}
-
-  async login(identifier: string, password: string) {
-    // Buscamos si existe un usuario con ese correo O con ese nombre de usuario
-    const user = (await this.prisma.user.findFirst({
+  async login({ identifier, password }: LoginDto) {
+    const user = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { id: identifier },
-          { email: identifier },
-          { username: identifier },
-        ],
+        OR: [{ email: identifier }, { username: identifier }],
       },
-    })) as AuthUser | null;
+    });
 
-    if (!user || user.password !== password) {
+    // Comparamos siempre contra un hash aunque el usuario no exista, para que
+    // el tiempo de respuesta no revele qué correos están registrados.
+    const storedHash =
+      user && isBcryptHash(user.password)
+        ? user.password
+        : '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin';
+
+    const passwordMatches = await bcrypt.compare(password, storedHash);
+
+    // Cuenta creada antes del hasheo y que la migración no alcanzó: la migramos
+    // al vuelo en el primer login correcto.
+    if (user && !isBcryptHash(user.password)) {
+      if (user.password !== password) {
+        throw new UnauthorizedException('Credenciales incorrectas');
+      }
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { password: await bcrypt.hash(password, BCRYPT_ROUNDS) },
+      });
+      return this.buildSession(user);
+    }
+
+    if (!user || !passwordMatches) {
       throw new UnauthorizedException('Credenciales incorrectas');
     }
 
-    const payload = { sub: user.id, email: user.email };
-    const token = this.jwtService.sign(payload);
+    return this.buildSession(user);
+  }
+
+  async register(dto: RegisterDto) {
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email: dto.email }, { username: dto.username }],
+      },
+    });
+
+    if (existingUser) {
+      throw new BadRequestException(
+        'El correo o nombre de usuario ya está en uso.',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+
+    // clientCode es @unique y lo calculamos con "último + 1". Dos registros
+    // simultáneos pueden pedir el mismo número, así que reintentamos ante P2002.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const lastUser = await this.prisma.user.findFirst({
+        orderBy: { clientCode: 'desc' },
+        select: { clientCode: true },
+      });
+      const newClientCode = lastUser
+        ? lastUser.clientCode + 1
+        : FIRST_CLIENT_CODE;
+
+      try {
+        const newUser = await this.prisma.user.create({
+          data: {
+            username: dto.username,
+            email: dto.email,
+            password: passwordHash,
+            // El rol nunca viene del cliente: registrarse no puede dar ADMIN.
+            role: 'USER',
+            fullName: dto.fullName ?? null,
+            gender: dto.gender ?? null,
+            clientCode: newClientCode,
+          },
+        });
+        return this.buildSession(newUser);
+      } catch (error: unknown) {
+        if (!isUniqueConstraintError(error)) throw error;
+        // Colisión de clientCode (o carrera en email/username): reintentamos.
+      }
+    }
+
+    throw new BadRequestException(
+      'No se pudo completar el registro. Inténtalo de nuevo.',
+    );
+  }
+
+  private buildSession(user: {
+    id: string;
+    email: string;
+    username: string;
+    fullName: string | null;
+    gender: string | null;
+    bio: string | null;
+    clientCode: number;
+    role: string;
+  }) {
+    const token = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
 
     return {
       access_token: token,
@@ -53,64 +136,37 @@ export class AuthService {
         gender: user.gender,
         bio: user.bio,
         clientCode: user.clientCode,
+        role: user.role,
       },
     };
   }
 
-  async register(
-    username: string,
-    email: string,
-    password: string,
-    fullName?: string,
-    gender?: string,
-  ) {
-    // Verificamos si el correo o el usuario ya existen
-    const existingUser = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ email: email }, { username: username }],
+  /** Perfil fresco desde la BD (el de localStorage puede estar desactualizado). */
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        fullName: true,
+        gender: true,
+        bio: true,
+        clientCode: true,
+        role: true,
+        createdAt: true,
       },
     });
-
-    if (existingUser) {
-      throw new BadRequestException(
-        'El correo o nombre de usuario ya está en uso.',
-      );
-    }
-    // LÓGICA NUEVA: Buscamos el último usuario para ver qué número de cliente le toca
-    const lastUser = (await this.prisma.user.findFirst({
-      orderBy: { clientCode: 'desc' },
-    })) as AuthUser | null;
-
-    // Si no hay usuarios, empieza en 150501. Si hay, le suma 1 al último.
-    const newClientCode = lastUser ? Number(lastUser.clientCode) + 1 : 150501;
-
-    // Creamos el usuario (El ID se genera automáticamente en la base de datos)
-    const newUser = (await this.prisma.user.create({
-      data: {
-        username,
-        email,
-        password,
-        role: 'USER',
-        fullName: fullName ?? null,
-        clientCode: newClientCode,
-        gender: gender ?? null,
-      },
-    })) as AuthUser;
-
-    const payload = { sub: newUser.id, email: newUser.email };
-    const token = this.jwtService.sign(payload);
-
-    return {
-      access_token: token,
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        username: username,
-        fullName: newUser.fullName,
-        gender: newUser.gender,
-        clientCode: newUser.clientCode,
-        bio: newUser.bio,
-      },
-    };
+    if (!user) throw new UnauthorizedException('La cuenta ya no existe.');
+    return user;
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
 }

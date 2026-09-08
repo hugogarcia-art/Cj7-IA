@@ -1,69 +1,57 @@
-import { Injectable, OnModuleInit, BadRequestException } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import type { CreateClientDto, UpdateClientDto } from './dto/client.dto';
+
+/** Solo se guardan dígitos: así "+591 700-11223" y "59170011223" no se duplican. */
+function normalizePhone(phone: string): string {
+  return phone.replace(/[^0-9]/g, '');
+}
 
 @Injectable()
-export class ClientService implements OnModuleInit {
-  private prisma = new PrismaClient();
+export class ClientService {
+  constructor(private readonly prisma: PrismaService) {}
 
-  async onModuleInit() {
-    await this.prisma.$connect();
-  }
-
-  async getClients() {
+  getClients(userId: string) {
     return this.prisma.client.findMany({
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
   }
-  async getClientById(id: string) {
-    return this.prisma.client.findUnique({ where: { id } });
+
+  async getClientById(userId: string, id: string) {
+    const client = await this.prisma.client.findFirst({
+      where: { id, userId },
+    });
+    if (!client) throw new NotFoundException('Cliente no encontrado');
+    return client;
   }
 
-  async getClientsForExport(ids: string[]) {
-    if (ids.length === 0) {
-      return this.prisma.client.findMany();
-    }
+  getClientsForExport(userId: string, ids: string[]) {
     return this.prisma.client.findMany({
-      where: { id: { in: ids } },
+      // Sin ids seleccionados exportamos todo, pero siempre acotado al dueño.
+      where: ids.length > 0 ? { userId, id: { in: ids } } : { userId },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
-  async createClient(data: {
-    name: string;
-    phone: string;
-    email?: string;
-    tags?: string[];
-    notes?: string;
-  }) {
-    let adminUser = await this.prisma.user.findFirst();
-    if (!adminUser) {
-      adminUser = await this.prisma.user.create({
-        data: {
-          username: 'admin',
-          email: 'admin@cj7ia.com',
-          password: 'password_seguro_123',
-          clientCode: 1,
-        },
-      });
-    }
+  async createClient(userId: string, data: CreateClientDto) {
     try {
       return await this.prisma.client.create({
         data: {
           name: data.name,
-          phone: data.phone,
+          phone: normalizePhone(data.phone),
           email: data.email,
-          tags: data.tags || [],
+          tags: data.tags ?? [],
           notes: data.notes,
-          userId: adminUser.id,
+          userId,
         },
       });
     } catch (error: unknown) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        typeof (error as { code?: unknown }).code === 'string' &&
-        (error as { code?: string }).code === 'P2002'
-      ) {
+      if (isUniqueConstraintError(error)) {
         throw new BadRequestException(
           'El número de teléfono ya está registrado.',
         );
@@ -72,58 +60,54 @@ export class ClientService implements OnModuleInit {
     }
   }
 
-  // NUEVA FUNCIÓN: Actualizar cliente
-  async updateClient(
-    id: string,
-    data: {
-      name?: string;
-      phone?: string;
-      email?: string;
-      status?: string;
-      tags?: string[];
-      notes?: string;
-      lastContact?: string;
-    },
-  ) {
-    return this.prisma.client.update({
-      where: { id },
-      data: {
-        name: data.name,
-        phone: data.phone,
-        email: data.email,
-        status: data.status,
-        tags: data.tags || [],
-        notes: data.notes,
-        lastContact: data.lastContact ? new Date(data.lastContact) : undefined,
-      },
-    });
-  }
-
-  // NUEVA FUNCIÓN: Eliminar cliente
-  async deleteClient(id: string) {
-    return this.prisma.client.delete({
-      where: { id },
-    });
-  }
-
-  // IMPORTACIÓN MASIVA: Acepta texto con líneas "nombre,telefono" o solo telefonos
-  async importClients(rawText: string) {
-    let adminUser = await this.prisma.user.findFirst();
-    if (!adminUser) {
-      adminUser = await this.prisma.user.create({
+  async updateClient(userId: string, id: string, data: UpdateClientDto) {
+    // updateMany en vez de update: filtra por userId, así nadie edita
+    // un cliente ajeno adivinando su id.
+    const result = await this.prisma.client
+      .updateMany({
+        where: { id, userId },
         data: {
-          username: 'admin',
-          email: 'admin@cj7ia.com',
-          password: 'password_seguro_123',
-          clientCode: 0,
+          name: data.name,
+          phone: data.phone ? normalizePhone(data.phone) : undefined,
+          email: data.email,
+          status: data.status,
+          // Solo tocamos tags si vienen en la petición.
+          tags: data.tags,
+          notes: data.notes,
+          lastContact: data.lastContact
+            ? new Date(data.lastContact)
+            : undefined,
         },
+      })
+      .catch((error: unknown) => {
+        if (isUniqueConstraintError(error)) {
+          throw new BadRequestException(
+            'El número de teléfono ya está registrado.',
+          );
+        }
+        throw error;
       });
-    }
 
+    if (result.count === 0)
+      throw new NotFoundException('Cliente no encontrado');
+    return this.getClientById(userId, id);
+  }
+
+  async deleteClient(userId: string, id: string) {
+    const result = await this.prisma.client.deleteMany({
+      where: { id, userId },
+    });
+    if (result.count === 0)
+      throw new NotFoundException('Cliente no encontrado');
+    return { deleted: true, id };
+  }
+
+  /** Importación masiva: acepta líneas "nombre,telefono" o solo teléfonos. */
+  async importClients(userId: string, rawText: string) {
     const lines = rawText
       .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
 
     const results = { imported: 0, skipped: 0, errors: 0 };
 
@@ -133,9 +117,9 @@ export class ClientService implements OnModuleInit {
         continue;
       }
 
-      const parts = line.split(/[,;\t]/).map((p) => p.trim());
+      const parts = line.split(/[,;\t]/).map((part) => part.trim());
       const name = parts[0] || '';
-      const phone = (parts[1] || parts[0] || '').replace(/[^0-9]/g, '');
+      const phone = normalizePhone(parts[1] || parts[0] || '');
 
       if (!phone || phone.length < 7) {
         results.errors++;
@@ -146,8 +130,8 @@ export class ClientService implements OnModuleInit {
         await this.prisma.client.create({
           data: {
             name: name || `Contacto ${phone}`,
-            phone: phone,
-            userId: adminUser.id,
+            phone,
+            userId,
           },
         });
         results.imported++;
@@ -158,4 +142,13 @@ export class ClientService implements OnModuleInit {
 
     return results;
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
 }

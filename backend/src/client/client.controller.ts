@@ -1,30 +1,63 @@
 import {
+  Body,
   Controller,
+  Delete,
   Get,
+  Param,
+  ParseUUIDPipe,
   Post,
   Put,
-  Delete,
-  Body,
-  Param,
-  Res,
   Query,
+  Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ClientService } from './client.service';
+import {
+  CreateClientDto,
+  ImportClientsDto,
+  UpdateClientDto,
+} from './dto/client.dto';
+import {
+  CurrentUser,
+  type AuthenticatedUser,
+} from '../auth/decorators/current-user.decorator';
+import { csvRow, safeFileName } from '../common/csv';
 
-export interface CreateClientDto {
-  name: string;
-  phone: string;
-  email?: string;
-  tags?: string[];
+/** Escapa los caracteres con significado en vCard 3.0 (RFC 2426). */
+function vcardValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
 }
 
-export interface UpdateClientDto {
-  name?: string;
-  phone?: string;
-  email?: string;
-  status?: string;
-  tags?: string[];
+function toVCard(client: {
+  name: string;
+  phone: string;
+  email: string | null;
+  notes: string | null;
+}): string {
+  return [
+    'BEGIN:VCARD',
+    'VERSION:3.0',
+    `FN:${vcardValue(client.name)}`,
+    `TEL;TYPE=CELL:+${vcardValue(client.phone)}`,
+    client.email ? `EMAIL:${vcardValue(client.email)}` : '',
+    client.notes ? `NOTE:${vcardValue(client.notes)}` : '',
+    'END:VCARD',
+  ]
+    .filter(Boolean)
+    .join('\r\n');
+}
+
+function parseIds(ids: string | undefined): string[] {
+  return ids
+    ? ids
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean)
+    : [];
 }
 
 @Controller('clients')
@@ -32,60 +65,57 @@ export class ClientController {
   constructor(private readonly clientService: ClientService) {}
 
   @Get()
-  async getClients() {
-    return this.clientService.getClients();
+  getClients(@CurrentUser() user: AuthenticatedUser) {
+    return this.clientService.getClients(user.id);
   }
+
   // EXPORTAR: vCard múltiple (para guardar en el celular)
   @Get('export/vcard')
   async exportVCard(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('ids') ids: string,
     @Res() res: Response,
-  ): Promise<any> {
-    const idArray = ids ? ids.split(',').filter(Boolean) : [];
-    const clients = await this.clientService.getClientsForExport(idArray);
+  ): Promise<void> {
+    const clients = await this.clientService.getClientsForExport(
+      user.id,
+      parseIds(ids),
+    );
 
     if (clients.length === 0) {
-      return res.status(404).send('No hay clientes para exportar');
+      res.status(404).send('No hay clientes para exportar');
+      return;
     }
-
-    const vcard = clients
-      .map((c) =>
-        [
-          'BEGIN:VCARD',
-          'VERSION:3.0',
-          `FN:${c.name}`,
-          `TEL;TYPE=CELL:+${c.phone}`,
-          c.email ? `EMAIL:${c.email}` : '',
-          c.notes ? `NOTE:${c.notes}` : '',
-          'END:VCARD',
-        ]
-          .filter(Boolean)
-          .join('\r\n'),
-      )
-      .join('\r\n');
 
     const date = new Date().toISOString().split('T')[0];
     res.set({
       'Content-Type': 'text/vcard; charset=utf-8',
       'Content-Disposition': `attachment; filename="contactos-cj7-${date}.vcf"`,
     });
-    return res.send(vcard);
+    res.send(clients.map(toVCard).join('\r\n'));
   }
 
   // EXPORTAR: CSV (para Excel / respaldo)
   @Get('export/csv')
   async exportCsv(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('ids') ids: string,
     @Res() res: Response,
-  ): Promise<any> {
-    const idArray = ids ? ids.split(',').filter(Boolean) : [];
-    const clients = await this.clientService.getClientsForExport(idArray);
+  ): Promise<void> {
+    const clients = await this.clientService.getClientsForExport(
+      user.id,
+      parseIds(ids),
+    );
 
     const header = 'Nombre,Telefono,Correo,Estado,Registro\n';
     const rows = clients
-      .map(
-        (c) =>
-          `"${c.name}","${c.phone}","${c.email || ''}","${c.status || ''}","${new Date(c.createdAt).toLocaleDateString()}"`,
+      .map((client) =>
+        csvRow([
+          client.name,
+          client.phone,
+          client.email ?? '',
+          client.status ?? '',
+          new Date(client.createdAt).toLocaleDateString('es-BO'),
+        ]),
       )
       .join('\n');
 
@@ -94,53 +124,55 @@ export class ClientController {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="contactos-cj7-${date}.csv"`,
     });
-    return res.send(header + rows);
+    // BOM para que Excel abra los acentos correctamente.
+    res.send(`\uFEFF${header}${rows}`);
   }
 
   @Get(':id/vcard')
-  async getVCard(@Param('id') id: string, @Res() res: Response): Promise<any> {
-    const client = await this.clientService.getClientById(id);
-    if (!client) {
-      return res.status(404).send('Cliente no encontrado');
-    }
-
-    const vcard = [
-      'BEGIN:VCARD',
-      'VERSION:3.0',
-      `FN:${client.name}`,
-      `TEL;TYPE=CELL:+${client.phone}`,
-      client.email ? `EMAIL:${client.email}` : '',
-      client.notes ? `NOTE:${client.notes}` : '',
-      'END:VCARD',
-    ]
-      .filter(Boolean)
-      .join('\r\n');
+  async getVCard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const client = await this.clientService.getClientById(user.id, id);
 
     res.set({
       'Content-Type': 'text/vcard; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${client.name.replace(/ /g, '_')}.vcf"`,
+      'Content-Disposition': `attachment; filename="${safeFileName(client.name)}.vcf"`,
     });
-    return res.send(vcard);
+    res.send(toVCard(client));
   }
+
   @Post()
-  async createClient(@Body() body: CreateClientDto) {
-    return this.clientService.createClient(body);
+  createClient(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: CreateClientDto,
+  ) {
+    return this.clientService.createClient(user.id, body);
   }
 
   @Post('import')
-  async importClients(@Body() body: { rawText: string }) {
-    return this.clientService.importClients(body.rawText);
+  importClients(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: ImportClientsDto,
+  ) {
+    return this.clientService.importClients(user.id, body.rawText);
   }
 
-  // NUEVA RUTA: Editar
   @Put(':id')
-  async updateClient(@Param('id') id: string, @Body() body: UpdateClientDto) {
-    return this.clientService.updateClient(id, body);
+  updateClient(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateClientDto,
+  ) {
+    return this.clientService.updateClient(user.id, id, body);
   }
 
-  // NUEVA RUTA: Eliminar
   @Delete(':id')
-  async deleteClient(@Param('id') id: string) {
-    return this.clientService.deleteClient(id);
+  deleteClient(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.clientService.deleteClient(user.id, id);
   }
 }
