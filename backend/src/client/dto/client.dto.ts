@@ -1,14 +1,31 @@
+import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsDateString,
   IsEmail,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
+
+/** Los mismos valores que ofrece el desplegable del formulario. */
+export const CLIENT_STATUSES = ['Nuevo', 'En Proceso', 'VIP', 'Inactivo'];
+
+/**
+ * Trata la cadena vacia como "no enviado".
+ *
+ * El formulario envia siempre todos los campos, tambien los que el usuario
+ * dejo en blanco. Sin esto, un correo vacio llega como "" y @IsEmail lo
+ * rechaza, cuando la intencion era justamente no poner correo.
+ */
+const EmptyToUndefined = () =>
+  Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  );
 
 export class CreateClientDto {
   @IsString()
@@ -22,10 +39,16 @@ export class CreateClientDto {
   })
   phone: string;
 
+  @EmptyToUndefined()
   @IsOptional()
   @IsEmail({}, { message: 'El correo no es válido.' })
   @MaxLength(255)
   email?: string;
+
+  // El formulario tiene un desplegable de Estado tambien al crear.
+  @IsOptional()
+  @IsIn(CLIENT_STATUSES, { message: 'El estado no es válido.' })
+  status?: string;
 
   @IsOptional()
   @IsArray()
@@ -50,14 +73,14 @@ export class UpdateClientDto {
   @Matches(/^\+?[0-9\s()-]{7,20}$/, { message: 'El teléfono no es válido.' })
   phone?: string;
 
+  @EmptyToUndefined()
   @IsOptional()
   @IsEmail({}, { message: 'El correo no es válido.' })
   @MaxLength(255)
   email?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(40)
+  @IsIn(CLIENT_STATUSES, { message: 'El estado no es válido.' })
   status?: string;
 
   @IsOptional()
@@ -71,6 +94,7 @@ export class UpdateClientDto {
   @MaxLength(2000)
   notes?: string;
 
+  @EmptyToUndefined()
   @IsOptional()
   @IsDateString()
   lastContact?: string;

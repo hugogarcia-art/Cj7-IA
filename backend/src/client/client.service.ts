@@ -45,6 +45,8 @@ export class ClientService {
           name: data.name,
           phone: normalizePhone(data.phone),
           email: data.email,
+          // Si no llega, Prisma aplica el valor por defecto del esquema.
+          status: data.status,
           tags: data.tags ?? [],
           notes: data.notes,
           userId,
