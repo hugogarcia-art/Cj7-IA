@@ -30,7 +30,7 @@ export default function ClientesPage() {
 
     const fetchClients = useCallback(async () => {
     try {
-      const res = await fetch("http://localhost:8765/clients");
+      const res = await fetch("https://cj7-ia.onrender.com/clients");
       const data = await res.json();
       // Validación: Si la respuesta es un arreglo, lo guardamos. Si no, mostramos arreglo vacío.
       if (Array.isArray(data)) {
@@ -87,7 +87,7 @@ export default function ClientesPage() {
   const handleDelete = async (id: string) => {
     if (window.confirm("¿Seguro que quieres eliminar este cliente?")) {
       try {
-        await fetch(`http://localhost:8765/clients/${id}`, { method: "DELETE" });
+        await fetch(`https://cj7-ia.onrender.com/clients/${id}`, { method: "DELETE" });
         fetchClients();
       } catch (error) {
         console.error("Error al eliminar:", error);
@@ -101,7 +101,7 @@ export default function ClientesPage() {
     const payload = { ...formData, tags: tagsArray };
 
     try {
-      const url = editingClient ? `http://localhost:8765/clients/${editingClient.id}` : "http://localhost:8765/clients";
+      const url = editingClient ? `https://cj7-ia.onrender.com/clients/${editingClient.id}` : "https://cj7-ia.onrender.com/clients";
       const method = editingClient ? "PUT" : "POST";
 
       const res = await fetch(url, {
@@ -126,7 +126,7 @@ export default function ClientesPage() {
 
     const handleImport = async () => {
     try {
-      const res = await fetch("http://localhost:8765/clients/import", {
+      const res = await fetch("https://cj7-ia.onrender.com/clients/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawText: importText }),
@@ -160,8 +160,8 @@ export default function ClientesPage() {
     }
   };
   const idsQuery = selectedIds.length > 0 ? `?ids=${selectedIds.join(',')}` : '';
-  const vcardExportUrl = `http://localhost:8765/clients/export/vcard${idsQuery}`;
-  const csvExportUrl = `http://localhost:8765/clients/export/csv${idsQuery}`;
+  const vcardExportUrl = `https://cj7-ia.onrender.com/clients/export/vcard${idsQuery}`;
+  const csvExportUrl = `https://cj7-ia.onrender.com/clients/export/csv${idsQuery}`;
 
   return (
     <div className="min-h-screen bg-gradient-soft p-4 md:p-8 relative">
@@ -267,7 +267,7 @@ export default function ClientesPage() {
                   <td className="py-4 px-4 text-right">
                     <div className="flex justify-end gap-2">
                       <a 
-                        href={`http://localhost:8765/clients/${client.id}/vcard`} 
+                        href={`https://cj7-ia.onrender.com/clients/${client.id}/vcard`} 
                         download
                         title="Guardar en mi celular"
                         className="p-2 text-gray-400 hover:text-green-600 transition-colors"

@@ -38,7 +38,7 @@ export default function InventarioPage() {
 
   const fetchProducts = useCallback(async () => {
     try {
-      const res = await fetch("http://localhost:8765/products");
+      const res = await fetch("https://cj7-ia.onrender.com/products");
       const data = await res.json();
       setProducts(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -109,7 +109,7 @@ export default function InventarioPage() {
   const handleDelete = async (id: string) => {
     if (window.confirm("¿Seguro que quieres eliminar este producto?")) {
       try {
-        await fetch(`http://localhost:8765/products/${id}`, { method: "DELETE" });
+        await fetch(`https://cj7-ia.onrender.com/products/${id}`, { method: "DELETE" });
         fetchProducts();
       } catch (error) {
         console.error("Error al eliminar:", error);
@@ -137,8 +137,8 @@ export default function InventarioPage() {
       if (selectedFile) fd.append("file", selectedFile);
 
       const url = editingProduct
-        ? `http://localhost:8765/products/${editingProduct.id}`
-        : "http://localhost:8765/products";
+        ? `https://cj7-ia.onrender.com/products/${editingProduct.id}`
+        : "https://cj7-ia.onrender.com/products";
       const method = editingProduct ? "PUT" : "POST";
 
       const res = await fetch(url, { method, body: fd });
