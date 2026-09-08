@@ -10,7 +10,7 @@ y un agente de ventas por WhatsApp con IA.
 
 ## Puesta en marcha en local
 
-Requisitos: **Node.js 20 o superior** y una base de datos PostgreSQL.
+Requisitos: **Node.js 22 o superior** (`@supabase/supabase-js` lo exige) y una base de datos PostgreSQL.
 
 ### Backend
 

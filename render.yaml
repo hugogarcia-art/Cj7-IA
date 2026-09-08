@@ -23,8 +23,10 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # Node 22 como minimo: @supabase/supabase-js necesita el WebSocket
+      # nativo, que no existe en Node 20 y hace fallar el arranque.
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
       # Render inyecta PORT automáticamente; main.ts lo respeta.
       - key: JWT_SECRET
         generateValue: true # Render genera un secreto aleatorio la 1ª vez
