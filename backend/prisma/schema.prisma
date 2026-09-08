@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  fullName    String?  // <-- NUEVO: Nombre completo
+  gender      String?  // <-- NUEVO: Sexo (Male/Female/Other)
+  clientCode  Int      @unique
+  bio         String?  // <-- NUEVO: Biografía o descripción
+  role      String   @default("ADMIN")
+  createdAt DateTime @default(now())
+  clients   Client[]
+  products  Product[]
+}
+
+model Client {
+  id          String   @id @default(uuid())
+  name        String
+  phone       String   @unique
+  email       String?
+  tags        String[]
+  status      String   @default("Nuevo")
+  notes       String?  // <-- NUEVO: Observaciones
+  lastContact DateTime? // <-- NUEVO: Último contacto
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  sales       Sale[]
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  category    String?
+  sku         String   @unique
+  price       Float
+  offerPrice  Float?
+  cost        Float?
+  stock       Int      @default(0)
+  minStock    Int      @default(0)
+  imageUrl    String?
+  status      String   @default("Activo")
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+}
+
+model Sale {
+  id        String   @id @default(uuid())
+  total     Float
+  status    String   @default("Pendiente")
+  createdAt DateTime @default(now())
+  client    Client   @relation(fields: [clientId], references: [id])
+  clientId  String
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  phone     String
+  sender    String   // "user" o "ai"
+  content   String
+  createdAt DateTime @default(now())
+}
