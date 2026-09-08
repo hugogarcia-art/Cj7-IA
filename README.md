@@ -42,34 +42,39 @@ npm run dev               # http://localhost:3000
 
 ## Despliegue en Render
 
-El repositorio incluye [`render.yaml`](render.yaml), un *blueprint* que crea los
-dos servicios de golpe: **New → Blueprint → conecta este repositorio**.
+**Un solo servicio** sirve la aplicación web y la API.
 
-Las variables marcadas `sync: false` no están en el repositorio: se pegan una
-sola vez en **Environment**, dentro del panel de cada servicio.
+El frontend se compila a HTML estático (`output: "export"` en
+`next.config.ts`) y NestJS lo sirve desde `frontend/out`. Todo vive en el mismo
+origen, así que no hay CORS que configurar, no hay una segunda instancia que
+despertar, y la aplicación y sus datos comparten dominio.
 
-| Servicio | Variables a rellenar a mano |
+Funciona porque todas las páginas son `"use client"` y piden los datos desde el
+navegador: no hay renderizado en servidor que perder.
+
+### Servicio nuevo
+
+**New → Blueprint** y conecta este repositorio: [`render.yaml`](render.yaml) lo
+configura todo.
+
+### Servicio que ya existe
+
+En **Settings**, ajusta tres campos:
+
+| Campo | Valor |
 |---|---|
-| `cj7-ia-backend` | `DATABASE_URL`, `DIRECT_URL`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `FRONTEND_URLS`, y las de Meta si usas WhatsApp |
-| `cj7-ia-frontend` | `NEXT_PUBLIC_API_URL` |
+| Root Directory | *(vacío)* |
+| Build Command | `cd frontend && npm ci && npm run build && cd ../backend && npm ci && npm run build` |
+| Start Command | `cd backend && npm run start:prod` |
+| Health Check Path | `/health` |
 
-`JWT_SECRET` la genera Render sola la primera vez (`generateValue: true`).
+Y en **Environment**, además de las que ya tengas:
 
-Dos detalles que se olvidan:
-
-- `FRONTEND_URLS` y `NEXT_PUBLIC_API_URL` van **con `https://` y sin barra
-  final**. Si no coinciden, el navegador bloquea las peticiones por CORS.
-- `NEXT_PUBLIC_API_URL` se incrusta en el bundle **durante el build**. Si la
-  cambias, hay que redesplegar el frontend, no solo reiniciarlo.
-
-### ¿Ya tienes un servicio desplegado?
-
-El blueprint crea servicios nuevos. Si prefieres seguir usando el que ya
-tienes (`cj7-ia`), no uses el blueprint: entra a ese servicio y añade a mano
-las variables de [`backend/.env.example`](backend/.env.example) — sobre todo
-`JWT_SECRET` y `FRONTEND_URLS`, que antes no existían.
-
----
+| Variable | |
+|---|---|
+| `JWT_SECRET` | **Obligatoria.** Sin ella el servidor no arranca. `openssl rand -base64 48` |
+| `META_APP_SECRET` | Recomendada: valida la firma del webhook de WhatsApp |
+| `WHATSAPP_VERIFY_TOKEN` | El que registres en el panel de Meta |
 
 ## Migración de datos (una sola vez)
 

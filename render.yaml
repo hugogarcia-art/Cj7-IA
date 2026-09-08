@@ -1,19 +1,25 @@
 # Blueprint de Render — https://render.com/docs/blueprint-spec
 #
-# En Render: New > Blueprint > conecta este repositorio.
-# Los valores con `sync: false` NO se guardan aquí: los pegas una sola vez
-# en el panel de Render (Environment) y quedan cifrados fuera del repositorio.
+# UN SOLO servicio sirve la aplicación web y la API.
+#
+# El frontend se compila como HTML estático (`output: "export"` en
+# next.config.ts) y NestJS lo sirve desde frontend/out. Como todo vive en el
+# mismo origen, no hay CORS que configurar ni un segundo servicio que despertar.
+#
+# Los valores con `sync: false` NO se guardan aquí: los pegas una sola vez en
+# el panel de Render (Environment) y quedan cifrados fuera del repositorio.
 
 services:
-  # ─── API (NestJS) ────────────────────────────────────────────────────
   - type: web
-    name: cj7-ia-backend
+    name: cj7-ia
     runtime: node
     plan: free
     region: oregon
-    rootDir: backend
-    buildCommand: npm ci && npm run build
-    startCommand: npm run start:prod
+    # Sin rootDir: el build necesita entrar a frontend/ y a backend/.
+    buildCommand: >-
+      cd frontend && npm ci && npm run build &&
+      cd ../backend && npm ci && npm run build
+    startCommand: cd backend && npm run start:prod
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -24,11 +30,6 @@ services:
         generateValue: true # Render genera un secreto aleatorio la 1ª vez
       - key: JWT_EXPIRES_IN
         value: 1d
-      # URL publica del frontend, CON https:// y sin barra final.
-      # Render solo sabe devolver el host pelado (sin esquema) via fromService,
-      # asi que esta se pega a mano una vez.
-      - key: FRONTEND_URLS
-        sync: false
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
@@ -53,22 +54,5 @@ services:
         sync: false
       - key: WHATSAPP_OWNER_EMAIL
         sync: false
-
-  # ─── Frontend (Next.js) ──────────────────────────────────────────────
-  - type: web
-    name: cj7-ia-frontend
-    runtime: node
-    plan: free
-    region: oregon
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    startCommand: npm run start
-    autoDeploy: true
-    envVars:
-      - key: NODE_VERSION
-        value: "20"
-      # NEXT_PUBLIC_* se incrusta en el bundle durante el build, asi que
-      # tiene que estar definida ANTES de compilar (Render ya lo hace asi).
-      # Valor: la URL del backend, con https:// y sin barra final.
-      - key: NEXT_PUBLIC_API_URL
-        sync: false
+      # FRONTEND_URLS solo hace falta si algun dia sirves la aplicacion desde
+      # otro dominio. Sirviendola desde aqui, no se usa.

@@ -9,15 +9,18 @@ import { clearSession, getToken } from "./auth";
 
 function normalizeBaseUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, "");
+  // Vacio = mismo origen. Es lo normal en produccion, donde NestJS sirve tanto
+  // la aplicacion como la API, asi que basta con rutas relativas.
+  if (trimmed === "") return "";
   // Es facil pegar "mi-api.onrender.com" sin esquema en el panel de Render;
   // sin protocolo, fetch lo trata como ruta relativa y falla en silencio.
   if (!/^https?:\/\//i.test(trimmed)) return `https://${trimmed}`;
   return trimmed;
 }
 
-export const API_URL = normalizeBaseUrl(
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8765",
-);
+// En desarrollo el frontend corre en :3000 y el backend en :8765, asi que hace
+// falta la URL completa (va en .env.local). En produccion se deja vacia.
+export const API_URL = normalizeBaseUrl(process.env.NEXT_PUBLIC_API_URL ?? "");
 
 export class ApiError extends Error {
   constructor(
