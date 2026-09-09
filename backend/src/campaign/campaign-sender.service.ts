@@ -24,10 +24,15 @@ export class CampaignSenderService implements OnModuleInit {
    * Se ejecuta de fondo: el controlador responde al instante.
    */
   async sendCampaign(userId: string, campaignId: string) {
-    const campaign = await this.campaignService.getCampaignById(
+    const campaign = (await this.campaignService.getCampaignById(
       userId,
       campaignId,
-    );
+    )) as unknown as {
+      status: string;
+      audience: string;
+      name: string;
+      message: string;
+    } | null;
     if (!campaign) throw new Error('Campaña no encontrada');
     if (campaign.status === 'enviando') {
       throw new Error('Esta campaña ya se está enviando');
@@ -70,7 +75,7 @@ export class CampaignSenderService implements OnModuleInit {
       let sent = false;
       try {
         sent = await this.aiService.sendWhatsAppMessage(client.phone, text);
-      } catch (error) {
+      } catch {
         this.logger.error(`Error enviando a ${client.phone}`);
       }
 

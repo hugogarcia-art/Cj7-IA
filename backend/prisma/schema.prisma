@@ -9,20 +9,21 @@ datasource db {
 }
 
 model User {
-  id         String    @id @default(uuid())
-  email      String    @unique
-  username   String    @unique
-  /// Hash bcrypt. Nunca la contraseña en claro.
-  password   String
-  fullName   String?
-  gender     String?
-  clientCode Int       @unique
-  bio        String?
-  role       String    @default("USER")
-  createdAt  DateTime  @default(now())
-  clients    Client[]
-  products   Product[]
+  id          String   @id @default(uuid())
+  email       String   @unique
+  username    String   @unique
+  password    String
+  fullName    String?
+  gender      String?
+  clientCode  Int      @unique
+  bio         String?
+  role        String   @default("USER")
+  remarketingEnabled Boolean @default(false)
+  createdAt   DateTime @default(now())
+  clients     Client[]
+  products    Product[]
   campaigns   Campaign[]
+  automations Automation[] 
 }
 
 model Client {
@@ -99,4 +100,12 @@ model Campaign {
   createdAt   DateTime @default(now())
   userId      String
   user        User     @relation(fields: [userId], references: [id])
+}
+model Automation {
+  id        String   @id @default(uuid())
+  type      String   @unique @default("remarketing_3_dias")
+  enabled   Boolean  @default(false) // Interruptor ON/OFF
+  daysThreshold Int  @default(3)     // Cada cuántos días
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
 }

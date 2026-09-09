@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class CampaignService implements OnModuleInit {
@@ -10,18 +10,21 @@ export class CampaignService implements OnModuleInit {
   }
 
   // Listar campañas del usuario
-  async getCampaigns(userId: string) {
+  getCampaigns(userId: string) {
+    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Crear campaña (borrador)
-  async createCampaign(
+  createCampaign(
     userId: string,
     data: { name: string; message: string; audience: string },
   ) {
+    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.create({
       data: {
         name: data.name,
@@ -30,20 +33,25 @@ export class CampaignService implements OnModuleInit {
         userId,
       },
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Obtener una campaña propia
-  async getCampaignById(userId: string, id: string) {
+  getCampaignById(userId: string, id: string) {
+    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.findFirst({
       where: { id, userId },
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Eliminar campaña
-  async deleteCampaign(userId: string, id: string) {
+  deleteCampaign(userId: string, id: string) {
+    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.deleteMany({
       where: { id, userId },
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   /**
@@ -51,7 +59,7 @@ export class CampaignService implements OnModuleInit {
    * audience = "todos" | "VIP" | "Nuevo" | "etiqueta:Mayorista" ...
    */
   async getAudience(userId: string, audience: string) {
-    const where: any = { userId };
+    const where: Prisma.ClientWhereInput = { userId };
 
     if (audience === 'todos') {
       // sin filtro adicional
@@ -86,6 +94,7 @@ export class CampaignService implements OnModuleInit {
    * Registra el resultado de cada envío en la campaña.
    */
   async recordResult(campaignId: string, sent: boolean) {
+    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     if (sent) {
       await this.prisma.campaign.update({
         where: { id: campaignId },
@@ -97,21 +106,26 @@ export class CampaignService implements OnModuleInit {
         data: { totalFailed: { increment: 1 } },
       });
     }
+    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Marca la campaña como enviada
   async markCompleted(campaignId: string) {
+    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     await this.prisma.campaign.update({
       where: { id: campaignId },
       data: { status: 'completada' },
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   async markSending(campaignId: string) {
+    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     await this.prisma.campaign.update({
       where: { id: campaignId },
       data: { status: 'enviando' },
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Productos para las variables {{producto}} y {{precio}}

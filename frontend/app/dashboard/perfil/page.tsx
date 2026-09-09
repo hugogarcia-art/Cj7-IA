@@ -3,8 +3,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { User, Mail, Fingerprint, Venus, Bot, LayoutDashboard, Users, ShoppingBag, Box, Megaphone, BarChart3, Settings, Hash, LogOut } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { Bot, Mail, Fingerprint, Venus, LayoutDashboard, Users, ShoppingBag, Box, Megaphone, BarChart3, Settings, Hash, Zap, User, LogOut } from "lucide-react";
+import { API_URL, apiFetch } from "@/lib/api";
 import { clearSession, useStoredUser } from "@/lib/auth";
 
 type UserProfile = {
@@ -23,6 +23,8 @@ export default function PerfilPage() {
   // llegan (el perfil guardado puede estar desactualizado).
   const storedUser = useStoredUser();
   const [freshUser, setFreshUser] = useState<UserProfile | null>(null);
+  const [automation, setAutomation] = useState<{ enabled: boolean; daysThreshold: number } | null>(null);
+  const [toggling, setToggling] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -31,7 +33,45 @@ export default function PerfilPage() {
       .catch((error: unknown) => {
         console.error("No se pudo actualizar el perfil:", error);
       });
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    fetch(`${API_URL}/automation/remarketing`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((response) => response.json())
+      .then((data: { enabled: boolean; daysThreshold: number }) => setAutomation(data))
+      .catch(() => console.error("Error al cargar automatización"));
   }, []);
+
+  const toggleAutomation = async () => {
+    if (!automation) return;
+    setToggling(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      const response = await fetch(`${API_URL}/automation/remarketing`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          enabled: !automation.enabled,
+          daysThreshold: automation.daysThreshold,
+        }),
+      });
+      if (response.ok) {
+        setAutomation({ ...automation, enabled: !automation.enabled });
+      }
+    } catch (error: unknown) {
+      console.error("Error al cambiar automatización:", error);
+    } finally {
+      setToggling(false);
+    }
+  };
 
   const user = freshUser ?? (storedUser as UserProfile | null);
 
@@ -167,6 +207,49 @@ export default function PerfilPage() {
                       {user.clientCode}
                     </span>
                   </div>
+                </div>
+
+                <div className={`rounded-2xl p-4 border transition-colors ${
+                  automation?.enabled
+                    ? "bg-green-500/10 border-green-500/30"
+                    : "bg-gray-500/10 border-gray-500/20"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                        automation?.enabled ? "bg-green-500/20 text-green-600" : "bg-gray-500/10 text-gray-500"
+                      }`}>
+                        <Zap size={18} />
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Remarketing automático</p>
+                        <p className={`font-medium text-sm ${automation?.enabled ? "text-green-600" : "text-gray-500"}`}>
+                          {automation?.enabled ? `Activo cada ${automation.daysThreshold} días` : "Desactivado"}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleAutomation}
+                      disabled={toggling || !automation}
+                      aria-label={automation?.enabled ? "Desactivar remarketing automático" : "Activar remarketing automático"}
+                      aria-pressed={automation?.enabled ?? false}
+                      className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${
+                        automation?.enabled ? "bg-green-500" : "bg-gray-400"
+                      } ${toggling ? "opacity-50" : "cursor-pointer"}`}
+                    >
+                      <span
+                        className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                          automation?.enabled ? "translate-x-5" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  {automation?.enabled && (
+                    <p className="text-xs text-green-600/80 mt-2">
+                      Tu IA contactará clientes sin respuesta cada {automation.daysThreshold} días
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

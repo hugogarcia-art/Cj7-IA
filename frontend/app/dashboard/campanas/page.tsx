@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowLeft, Megaphone, Plus, X, Trash2, Send, Users, Bot,
+  ArrowLeft, Megaphone, Plus, X, Trash2, Send,
   CheckCircle2, XCircle, Clock, Eye, Sparkles,
 } from "lucide-react";
 
@@ -276,9 +276,9 @@ export default function CampanasPage() {
                 {/* Vista previa en vivo */}
                 {formData.message && (
                   <div>
-                    <label className="block text-sm text-gray-500 mb-1 flex items-center gap-1">
+                    <div className="flex items-center gap-1 text-sm text-gray-500 mb-1">
                       <Eye size={14} /> Vista previa (cómo lo verá el cliente)
-                    </label>
+                    </div>
                     <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 text-sm">
                       {preview}
                     </div>
