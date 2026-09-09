@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call -- class-validator decorators are typed dynamically. */
 import { Transform, type TransformFnParams } from 'class-transformer';
 import {
   ArrayMaxSize,

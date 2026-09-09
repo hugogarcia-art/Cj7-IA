@@ -22,6 +22,7 @@ model User {
   createdAt  DateTime  @default(now())
   clients    Client[]
   products   Product[]
+  campaigns   Campaign[]
 }
 
 model Client {
@@ -84,4 +85,18 @@ model Message {
   createdAt DateTime @default(now())
 
   @@index([phone, createdAt])
+}
+
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  message     String
+  audience    String   @default("todos")
+  status      String   @default("borrador")
+  totalSent   Int      @default(0)
+  totalFailed Int      @default(0)
+  totalOpened Int      @default(0)
+  createdAt   DateTime @default(now())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
 }

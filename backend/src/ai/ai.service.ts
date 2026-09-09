@@ -116,4 +116,32 @@ export class AiService {
       .map((product) => `- ${product.name} (Precio: ${product.price} Bs)`)
       .join('\n');
   }
+
+  // Envía un mensaje de texto directo por WhatsApp (para campañas)
+  async sendWhatsAppMessage(to: string, text: string): Promise<boolean> {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.META_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to,
+          type: 'text',
+          text: { body: text },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const error: unknown = await response.json().catch(() => null);
+      console.error(`❌ Meta rechazó el envío a ${to}:`, JSON.stringify(error));
+      return false;
+    }
+
+    return true;
+  }
 }
