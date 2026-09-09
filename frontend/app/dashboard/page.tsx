@@ -30,9 +30,9 @@ export default function DashboardPage() {
               <Link href="/dashboard/inventario" className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
                 <Box size={18} /> Inventario
               </Link>
-              <button className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
-                <Megaphone size={18} /> Meta Ads IA
-              </button>
+              <Link href="/dashboard/campanas" className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
+                <Megaphone size={18} /> Campañas WhatsApp
+              </Link>
               <button className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
                 <BarChart3 size={18} /> Analítica
               </button>

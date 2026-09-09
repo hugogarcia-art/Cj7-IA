@@ -1,3 +1,5 @@
+import { AutomationModule } from './automation/automation.module';
+import { CampaignModule } from './campaign/campaign.module';
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
@@ -27,7 +29,9 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     ClientModule,
     ProductModule,
     StorageModule,
+    CampaignModule,
     EventsModule,
+    AutomationModule,
     //QueueModule,
   ],
   controllers: [AppController],
