@@ -1,3 +1,6 @@
+import { UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { StorageService } from '../storage/storage.service';
 import {
   Body,
   Controller,
@@ -19,6 +22,7 @@ export class CampaignController {
   constructor(
     private readonly campaignService: CampaignService,
     private readonly campaignSender: CampaignSenderService,
+    private readonly storageService: StorageService,
   ) {}
 
   @Get()
@@ -36,6 +40,39 @@ export class CampaignController {
       name: body.name,
       message: body.message,
       audience: body.audience || 'todos',
+    });
+  }
+  // Flujo avanzado: imagen + programación + recurrencia
+  @Post('advanced')
+  @UseInterceptors(FileInterceptor('image'))
+  async createAdvancedCampaign(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body()
+    body: {
+      name: string;
+      message: string;
+      audience?: string;
+      scheduledAt?: string;
+      recurrenceDays?: string;
+    },
+    @UploadedFile() image: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    // Sube la imagen a Supabase si viene una
+    let imageUrl: string | undefined = undefined;
+    if (image) {
+      const fileName = `campana-${Date.now()}.jpg`;
+      imageUrl = await this.storageService.uploadImage(image, fileName);
+    }
+
+    return this.campaignService.createCampaignAdvanced(user.id, {
+      name: body.name,
+      message: body.message,
+      audience: body.audience || 'todos',
+      imageUrl,
+      scheduledAt: body.scheduledAt,
+      recurrenceDays: body.recurrenceDays
+        ? parseInt(body.recurrenceDays)
+        : undefined,
     });
   }
 

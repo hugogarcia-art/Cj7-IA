@@ -128,6 +128,39 @@ export class ClientController {
     res.send(`\uFEFF${header}${rows}`);
   }
 
+  // Últimos mensajes de WhatsApp (para el Dashboard)
+  @Get('messages/recent')
+  getRecentMessages(@CurrentUser() user: AuthenticatedUser) {
+    return this.clientService.getRecentMessages(user.id);
+  }
+
+  // Historial de conversaciones del cliente
+  @Get(':id/messages')
+  getClientMessages(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.clientService.getClientMessages(user.id, id);
+  }
+
+  // Historial de compras del cliente
+  @Get(':id/sales')
+  getClientSales(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.clientService.getClientSales(user.id, id);
+  }
+
+  // Obtener un cliente propio (para la ficha de detalle)
+  @Get(':id')
+  getClient(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.clientService.getClientById(user.id, id);
+  }
+
   @Get(':id/vcard')
   async getVCard(
     @CurrentUser() user: AuthenticatedUser,

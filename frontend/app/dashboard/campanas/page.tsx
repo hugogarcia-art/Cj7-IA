@@ -1,10 +1,11 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, Megaphone, Plus, X, Trash2, Send,
-  CheckCircle2, XCircle, Clock, Eye, Sparkles,
+  CheckCircle2, XCircle, Clock, Eye, Sparkles, ImageIcon, CalendarClock, Repeat,
 } from "lucide-react";
 
 type Campaign = {
@@ -17,6 +18,8 @@ type Campaign = {
   totalFailed: number;
   totalOpened: number;
   createdAt: string;
+  imageUrl?: string;
+  scheduledAt?: string;
 };
 
 const AUDIENCES = [
@@ -36,6 +39,11 @@ export default function CampanasPage() {
   const [sendingId, setSendingId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({ name: "", message: "", audience: "todos" });
+  const [campaignImage, setCampaignImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [recurrenceDays, setRecurrenceDays] = useState(0);
 
   const fetchCampaigns = useCallback(async () => {
     try {
@@ -62,13 +70,24 @@ export default function CampanasPage() {
     e.preventDefault();
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${API}/campaigns`, {
+      const fd = new FormData();
+      fd.append("name", formData.name);
+      fd.append("message", formData.message);
+      fd.append("audience", formData.audience);
+      if (scheduleEnabled && scheduledAt) {
+        fd.append("scheduledAt", new Date(scheduledAt).toISOString());
+      }
+      if (recurrenceDays > 0) {
+        fd.append("recurrenceDays", String(recurrenceDays));
+      }
+      if (campaignImage) {
+        fd.append("image", campaignImage);
+      }
+
+      const res = await fetch(`${API}/campaigns/advanced`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
       });
       if (!res.ok) {
         alert("Error al crear la campaña.");
@@ -76,6 +95,11 @@ export default function CampanasPage() {
       }
       setIsModalOpen(false);
       setFormData({ name: "", message: "", audience: "todos" });
+      setCampaignImage(null);
+      setImagePreview(null);
+      setScheduleEnabled(false);
+      setScheduledAt("");
+      setRecurrenceDays(0);
       fetchCampaigns();
     } catch (error) {
       console.error("Error al crear campaña:", error);
@@ -189,6 +213,16 @@ export default function CampanasPage() {
                     <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
                       👥 {campaign.audience}
                     </span>
+                    {campaign.imageUrl && (
+                      <span className="px-3 py-1 rounded-full bg-purple-500/10 text-purple-600 text-xs font-medium">
+                        🖼️ Con imagen
+                      </span>
+                    )}
+                    {campaign.status === "programada" && campaign.scheduledAt && (
+                      <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                        📅 {new Date(campaign.scheduledAt).toLocaleString("es-BO")}
+                      </span>
+                    )}
                   </div>
                   <p className="text-gray-500 text-sm mt-2 line-clamp-2">{campaign.message}</p>
 
@@ -271,6 +305,88 @@ export default function CampanasPage() {
                     className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                     placeholder="Hola {{nombre}}! Tenemos {{producto}} por solo {{precio}}..."
                   />
+                </div>
+
+                {/* Imagen de la campaña */}
+                <div>
+                  <label className="block text-sm text-gray-500 mb-1">Imagen (opcional)</label>
+                  <div className="flex items-center gap-3">
+                    {imagePreview ? (
+                      <Image
+                        src={imagePreview}
+                        alt="Vista previa"
+                        width={64}
+                        height={64}
+                        unoptimized
+                        className="w-16 h-16 rounded-xl object-cover"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                        <ImageIcon size={24} />
+                      </div>
+                    )}
+                    <label className="flex-1 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 py-2.5 rounded-xl font-medium text-xs flex items-center justify-center gap-2 cursor-pointer hover:bg-primary/5">
+                      <ImageIcon size={14} /> Subir imagen
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setCampaignImage(file);
+                          setImagePreview(URL.createObjectURL(file));
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Programar envío */}
+                <div className={`rounded-2xl p-4 border transition-colors ${
+                  scheduleEnabled ? "bg-primary/5 border-primary/30" : "bg-gray-500/5 border-gray-500/20"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CalendarClock size={16} className={scheduleEnabled ? "text-primary" : "text-gray-400"} />
+                      <span className="text-sm font-medium">Programar envío</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setScheduleEnabled(!scheduleEnabled)}
+                      aria-pressed={scheduleEnabled}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${scheduleEnabled ? "bg-primary" : "bg-gray-300 dark:bg-gray-600"}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${scheduleEnabled ? "translate-x-5" : ""}`} />
+                    </button>
+                  </div>
+                  {scheduleEnabled && (
+                    <input
+                      type="datetime-local"
+                      step="60"
+                      required
+                      value={scheduledAt}
+                      onChange={(e) => setScheduledAt(e.target.value)}
+                      className="w-full mt-3 px-4 py-2.5 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                    />
+                  )}
+                </div>
+
+                {/* Repetir campaña */}
+                <div>
+                  <label className="text-sm text-gray-500 mb-1 flex items-center gap-1">
+                    <Repeat size={14} /> Repetir campaña
+                  </label>
+                  <select
+                    value={recurrenceDays}
+                    onChange={(e) => setRecurrenceDays(Number(e.target.value))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value={0}>No repetir (envío único)</option>
+                    <option value={3}>Cada 3 días</option>
+                    <option value={7}>Cada 7 días</option>
+                    <option value={30}>Cada 30 días</option>
+                  </select>
                 </div>
 
                 {/* Vista previa en vivo */}

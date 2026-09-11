@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
   Headers,
   Logger,
@@ -65,14 +64,16 @@ export class WhatsAppController {
     @Body() body: WhatsAppWebhookBody,
     @Res() res: Response,
   ): Promise<void> {
+    // 1. Verifica la firma primero
     if (!this.whatsappService.verifySignature(req.rawBody, signature)) {
-      throw new ForbiddenException('Firma inválida');
+      res.status(403).send('Firma inválida');
+      return;
     }
 
-    // Respondemos 200 siempre y de inmediato: si Meta no recibe el ACK a
-    // tiempo reintenta el mismo mensaje y la IA contestaría dos veces.
+    // 2. ⚡ CONFIRMA A META DE INMEDIATO (anti-duplicados)
     res.status(200).send('EVENT_RECEIVED');
 
+    // 3. Luego procesa EN SEGUNDO PLANO (sin await)
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     const phone = message?.from;
     const text = message?.text?.body;
@@ -82,7 +83,7 @@ export class WhatsAppController {
       await this.whatsappService.handleIncomingMessage(phone, text);
     } catch (error: unknown) {
       this.logger.error(
-        `Error procesando el mensaje de ${phone}: ${describeError(error)}`,
+        `Error procesando mensaje de ${phone}: ${describeError(error)}`,
       );
     }
   }

@@ -5,18 +5,18 @@ import { Prisma, PrismaClient } from '@prisma/client';
 export class CampaignService implements OnModuleInit {
   private prisma = new PrismaClient();
 
-  async onModuleInit() {
-    await this.prisma.$connect();
+  onModuleInit() {
+    // Intentionally left blank; Prisma client is initialized lazily.
   }
 
   // Listar campañas del usuario
   getCampaigns(userId: string) {
-    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Crear campaña (borrador)
@@ -24,7 +24,7 @@ export class CampaignService implements OnModuleInit {
     userId: string,
     data: { name: string; message: string; audience: string },
   ) {
-    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.create({
       data: {
         name: data.name,
@@ -33,25 +33,25 @@ export class CampaignService implements OnModuleInit {
         userId,
       },
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Obtener una campaña propia
   getCampaignById(userId: string, id: string) {
-    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.findFirst({
       where: { id, userId },
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Eliminar campaña
   deleteCampaign(userId: string, id: string) {
-    /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     return this.prisma.campaign.deleteMany({
       where: { id, userId },
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   /**
@@ -94,7 +94,7 @@ export class CampaignService implements OnModuleInit {
    * Registra el resultado de cada envío en la campaña.
    */
   async recordResult(campaignId: string, sent: boolean) {
-    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     if (sent) {
       await this.prisma.campaign.update({
         where: { id: campaignId },
@@ -106,26 +106,26 @@ export class CampaignService implements OnModuleInit {
         data: { totalFailed: { increment: 1 } },
       });
     }
-    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Marca la campaña como enviada
   async markCompleted(campaignId: string) {
-    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     await this.prisma.campaign.update({
       where: { id: campaignId },
       data: { status: 'completada' },
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   async markSending(campaignId: string) {
-    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
     await this.prisma.campaign.update({
       where: { id: campaignId },
       data: { status: 'enviando' },
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+    //* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   }
 
   // Productos para las variables {{producto}} y {{precio}}
@@ -137,6 +137,59 @@ export class CampaignService implements OnModuleInit {
         { createdAt: 'desc' },
       ],
       take: 1,
+    });
+  }
+  // Campañas programadas cuya hora ya llegó
+  getScheduledCampaignsDue() {
+    return this.prisma.campaign.findMany({
+      where: {
+        status: 'programada',
+        scheduledAt: { lte: new Date() },
+      },
+    });
+  }
+
+  // Re-programa una campaña recurrente para su siguiente ronda
+  reschedule(campaignId: string, recurrenceDays: number) {
+    const next = new Date();
+    next.setDate(next.getDate() + recurrenceDays);
+    return this.prisma.campaign.update({
+      where: { id: campaignId },
+      data: { scheduledAt: next, status: 'programada' },
+    });
+  }
+
+  // Versión de createCampaign que acepta imagen/programación/recurrencia
+  async createCampaignAdvanced(
+    userId: string,
+    data: {
+      name: string;
+      message: string;
+      audience: string;
+      imageUrl?: string;
+      scheduledAt?: string | Date;
+      recurrenceDays?: number;
+    },
+  ) {
+    // Guardamos el scheduledAt SIEMPRE que llegue.
+    // El cron decidirá después si ya es hora de enviar.
+    const scheduledAtDate = data.scheduledAt
+      ? new Date(data.scheduledAt)
+      : null;
+    const isScheduled =
+      scheduledAtDate !== null && !isNaN(scheduledAtDate.getTime());
+
+    return this.prisma.campaign.create({
+      data: {
+        name: data.name,
+        message: data.message,
+        audience: data.audience || 'todos',
+        imageUrl: data.imageUrl,
+        scheduledAt: scheduledAtDate,
+        recurrenceDays: data.recurrenceDays || null,
+        status: isScheduled ? 'programada' : 'borrador',
+        userId,
+      },
     });
   }
 }
