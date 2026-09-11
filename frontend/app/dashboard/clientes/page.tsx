@@ -2,7 +2,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bot, Users, Plus, ArrowLeft, Phone, Mail, X, Pencil, Trash2, Search, Smartphone, Upload, Download, FileSpreadsheet } from "lucide-react";
+import {
+  Bot, Users, Plus, ArrowLeft, Phone, Mail, X, Pencil, Trash2, Search,
+  Smartphone, Upload, Download, FileSpreadsheet, MessageSquare, ShoppingCart,
+  Calendar, User,
+} from "lucide-react";
 import { apiDownload, apiFetch } from "@/lib/api";
 
 type Client = {
@@ -17,6 +21,22 @@ type Client = {
   lastContact?: string;
 };
 
+type ClientMessage = {
+  id: string;
+  sender: string;
+  content: string;
+  createdAt: string;
+};
+
+type ClientSale = {
+  id: string;
+  total: number;
+  status: string;
+  paymentMethod?: string;
+  notes?: string;
+  createdAt: string;
+};
+
 export default function ClientesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +48,12 @@ export default function ClientesPage() {
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: number } | null>(null);
   const [formData, setFormData] = useState({ name: "", phone: "", email: "", status: "Nuevo", tags: "", notes: "" });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [detailClient, setDetailClient] = useState<Client | null>(null);
+  const [detailMessages, setDetailMessages] = useState<ClientMessage[]>([]);
+  const [detailSales, setDetailSales] = useState<ClientSale[]>([]);
+  const [detailTab, setDetailTab] = useState<"chat" | "sales" | "info">("chat");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const fetchClients = useCallback(async () => {
     try {
@@ -89,6 +115,34 @@ export default function ClientesPage() {
         alert(error instanceof Error ? error.message : "Error al eliminar.");
       }
     }
+  };
+
+  const openDetailModal = async (client: Client) => {
+    setDetailClient(client);
+    setDetailMessages([]);
+    setDetailSales([]);
+    setDetailTab("chat");
+    setDetailLoading(true);
+    setDetailError(null);
+
+    try {
+      const [messages, sales] = await Promise.all([
+        apiFetch<ClientMessage[]>(`/clients/${client.id}/messages`),
+        apiFetch<ClientSale[]>(`/clients/${client.id}/sales`),
+      ]);
+      setDetailMessages(Array.isArray(messages) ? messages : []);
+      setDetailSales(Array.isArray(sales) ? sales : []);
+    } catch (error) {
+      console.error("Error al cargar historial:", error);
+      setDetailError("No se pudo cargar el historial de este cliente.");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeDetailModal = () => {
+    setDetailClient(null);
+    setDetailError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -256,7 +310,11 @@ export default function ClientesPage() {
                       className="w-4 h-4 accent-primary cursor-pointer"
                     />
                   </td>
-                  <td className="py-4 px-4 font-medium">{client.name}</td>
+                  <td className="py-4 px-4 font-medium">
+                    <button onClick={() => void openDetailModal(client)} className="hover:text-primary transition-colors text-left">
+                      {client.name}
+                    </button>
+                  </td>
                   <td className="py-4 px-4 text-gray-500 text-sm">
                     <div className="flex items-center gap-2"><Phone size={14} /> {client.phone}</div>
                     {client.email && <div className="flex items-center gap-2 mt-1"><Mail size={14} /> {client.email}</div>}
@@ -424,6 +482,135 @@ export default function ClientesPage() {
         )}
       </AnimatePresence>
       {/* 👆 HASTA AQUÍ 👆 */}
+
+      <AnimatePresence>
+        {detailClient && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+            onClick={closeDetailModal}
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 16 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 16 }}
+              className="glass rounded-3xl p-6 md:p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex justify-between items-start gap-4 mb-6">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-14 h-14 rounded-full bg-primary text-white flex items-center justify-center text-xl font-bold shadow-glow shrink-0">
+                    {detailClient.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-2xl font-bold truncate">{detailClient.name}</h3>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                      <span className="flex items-center gap-1"><Phone size={12} /> +{detailClient.phone}</span>
+                      {detailClient.email && <span className="flex items-center gap-1"><Mail size={12} /> {detailClient.email}</span>}
+                    </div>
+                  </div>
+                </div>
+                <button type="button" onClick={closeDetailModal} aria-label="Cerrar detalle" className="text-gray-400 hover:text-gray-600 shrink-0">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-6">
+                <button type="button" onClick={() => setDetailTab("chat")} className={`px-4 py-2 rounded-xl font-medium text-xs flex items-center gap-2 transition-colors ${detailTab === "chat" ? "bg-primary text-white" : "bg-white/50 dark:bg-white/5 text-gray-600 dark:text-gray-300"}`}>
+                  <MessageSquare size={14} /> Chat ({detailMessages.length})
+                </button>
+                <button type="button" onClick={() => setDetailTab("sales")} className={`px-4 py-2 rounded-xl font-medium text-xs flex items-center gap-2 transition-colors ${detailTab === "sales" ? "bg-primary text-white" : "bg-white/50 dark:bg-white/5 text-gray-600 dark:text-gray-300"}`}>
+                  <ShoppingCart size={14} /> Compras ({detailSales.length})
+                </button>
+                <button type="button" onClick={() => setDetailTab("info")} className={`px-4 py-2 rounded-xl font-medium text-xs flex items-center gap-2 transition-colors ${detailTab === "info" ? "bg-primary text-white" : "bg-white/50 dark:bg-white/5 text-gray-600 dark:text-gray-300"}`}>
+                  <Calendar size={14} /> Info
+                </button>
+              </div>
+
+              {detailLoading && (
+                <div className="py-12 text-center text-gray-500 text-sm">Cargando historial...</div>
+              )}
+
+              {!detailLoading && detailError && (
+                <div className="py-8 text-center text-red-500 text-sm">{detailError}</div>
+              )}
+
+              {!detailLoading && !detailError && detailTab === "chat" && (
+                detailMessages.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8 text-sm">Sin conversaciones registradas.</p>
+                ) : (
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                    {detailMessages.map((message) => (
+                      <div key={message.id} className={`flex ${message.sender === "ai" ? "justify-start" : "justify-end"}`}>
+                        <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${message.sender === "ai" ? "bg-white dark:bg-gray-800 rounded-bl-sm" : "bg-green-500/20 rounded-br-sm"}`}>
+                          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {message.sender === "ai" ? "CJ7 IA" : "Cliente"} · {new Date(message.createdAt).toLocaleString("es-BO")}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {!detailLoading && !detailError && detailTab === "sales" && (
+                detailSales.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8 text-sm">Sin compras registradas.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {detailSales.map((sale) => (
+                      <div key={sale.id} className="bg-white/50 dark:bg-white/5 rounded-2xl p-4 flex justify-between items-center gap-4">
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">{sale.notes || "Venta"}</p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {new Date(sale.createdAt).toLocaleDateString("es-BO")} · {sale.paymentMethod || "Sin método"}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="font-bold text-primary">{sale.total} Bs</p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${sale.status === "Cancelado" ? "bg-red-500/10 text-red-500" : sale.status === "Completado" ? "bg-green-500/10 text-green-600" : "bg-blue-500/10 text-blue-500"}`}>
+                            {sale.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {!detailLoading && !detailError && detailTab === "info" && (
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-4 border-b border-gray-200/50 dark:border-gray-700/50 pb-2">
+                    <span className="text-gray-400 flex items-center gap-2"><User size={14} /> Estado</span>
+                    <span className="font-medium">{detailClient.status || "Nuevo"}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4 border-b border-gray-200/50 dark:border-gray-700/50 pb-2">
+                    <span className="text-gray-400">Etiquetas</span>
+                    <span className="font-medium text-right">{detailClient.tags?.join(", ") || "Sin etiquetas"}</span>
+                  </div>
+                  {detailClient.notes && (
+                    <div className="flex items-start justify-between gap-4 border-b border-gray-200/50 dark:border-gray-700/50 pb-2">
+                      <span className="text-gray-400">Observaciones</span>
+                      <span className="font-medium text-right">{detailClient.notes}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-4 border-b border-gray-200/50 dark:border-gray-700/50 pb-2">
+                    <span className="text-gray-400">Registro</span>
+                    <span className="font-medium">{new Date(detailClient.createdAt).toLocaleDateString("es-BO")}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-gray-400">ID</span>
+                    <span className="font-mono text-xs text-gray-500 truncate">{detailClient.id}</span>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

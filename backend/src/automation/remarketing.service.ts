@@ -27,11 +27,15 @@ export class RemarketingService implements OnModuleInit {
       const sleepyClients = await this.automationService.getSleepyClients();
 
       if (sleepyClients.length === 0) {
-        this.logger.log('😴 Remarketing: no hay clientes dormidos que despertar.');
+        this.logger.log(
+          '😴 Remarketing: no hay clientes dormidos que despertar.',
+        );
         return;
       }
 
-      this.logger.log(`🤖 Remarketing: ${sleepyClients.length} clientes para despertar`);
+      this.logger.log(
+        `🤖 Remarketing: ${sleepyClients.length} clientes para despertar`,
+      );
 
       for (const item of sleepyClients) {
         await this.sendRemarketingToClient(item);
@@ -55,15 +59,16 @@ export class RemarketingService implements OnModuleInit {
       // 1. Lee el catálogo real del dueño
       const products = await this.prisma.product.findMany({
         where: { userId: item.userId, status: 'Activo' },
-        orderBy: [{ offerPrice: { sort: 'asc', nulls: 'first' } }, { createdAt: 'desc' }],
+        orderBy: [
+          { offerPrice: { sort: 'asc', nulls: 'first' } },
+          { createdAt: 'desc' },
+        ],
         take: 3,
       });
 
       const catalog = products
         .map((p) => `- ${p.name} (Precio: ${p.offerPrice ?? p.price} Bs)`)
         .join('\n');
-
-      const ownerName = item.ownerEmail.split('@')[0];
 
       // 2. La IA genera un mensaje de seguimiento personalizado
       const message = await this.aiService.generateWhatsAppResponse(
@@ -98,7 +103,10 @@ export class RemarketingService implements OnModuleInit {
         );
       }
     } catch (error) {
-      this.logger.error(`❌ Error en remarketing para ${item.client.phone}:`, error);
+      this.logger.error(
+        `❌ Error en remarketing para ${item.client.phone}:`,
+        error,
+      );
     }
   }
 }

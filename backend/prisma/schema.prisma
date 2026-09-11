@@ -68,12 +68,14 @@ model Product {
 }
 
 model Sale {
-  id        String   @id @default(uuid())
-  total     Float
-  status    String   @default("Pendiente")
-  createdAt DateTime @default(now())
-  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientId  String
+  id            String     @id @default(uuid())
+  total         Float
+  status        String     @default("Nuevo") // Nuevo, Pendiente, En Proceso, Pagado, Enviado, Completado, Cancelado
+  paymentMethod String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  clientId      String
+  client        Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([clientId])
 }
@@ -89,17 +91,20 @@ model Message {
 }
 
 model Campaign {
-  id          String   @id @default(uuid())
-  name        String
-  message     String
-  audience    String   @default("todos")
-  status      String   @default("borrador")
-  totalSent   Int      @default(0)
-  totalFailed Int      @default(0)
-  totalOpened Int      @default(0)
-  createdAt   DateTime @default(now())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  id             String    @id @default(uuid())
+  name           String
+  message        String
+  imageUrl       String?   // Imagen de la campaña (Supabase)
+  audience       String    @default("todos")
+  status         String    @default("borrador") // borrador | programada | enviando | completada
+  scheduledAt    DateTime? // Fecha/hora programada del envío
+  recurrenceDays Int?      // Si se define: se repite cada X días
+  totalSent      Int       @default(0)
+  totalFailed    Int       @default(0)
+  totalOpened    Int       @default(0)
+  createdAt      DateTime  @default(now())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
 }
 model Automation {
   id        String   @id @default(uuid())

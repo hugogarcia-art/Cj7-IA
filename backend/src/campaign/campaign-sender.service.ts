@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { CampaignService } from './campaign.service';
 import { AiService } from '../ai/ai.service';
 
@@ -19,10 +20,46 @@ export class CampaignSenderService implements OnModuleInit {
     // No conectamos nada aquí; el envío es bajo demanda.
   }
 
-  /**
-   * Envía la campaña a toda la audiencia.
-   * Se ejecuta de fondo: el controlador responde al instante.
-   */
+  // Revisa cada minuto si hay campañas programadas cuya hora llegó
+  @Interval(60_000)
+  async checkScheduledCampaigns() {
+    try {
+      const due = await this.campaignService.getScheduledCampaignsDue();
+      for (const campaign of due) {
+        this.logger.log(`Enviando campaña programada: "${campaign.name}"`);
+        await this.executeCampaign(campaign);
+      }
+    } catch (error) {
+      this.logger.error('Error revisando campañas programadas:', error);
+    }
+  }
+
+  // Ejecuta una campaña ya cargada (usado por el cron)
+  private async executeCampaign(campaign: {
+    id: string;
+    userId: string;
+    name: string;
+    message: string;
+    imageUrl: string | null;
+    audience: string;
+    recurrenceDays: number | null;
+  }) {
+    await this.campaignService.markSending(campaign.id);
+
+    const audience = await this.campaignService.getAudience(
+      campaign.userId,
+      campaign.audience,
+    );
+
+    await this.processRecipients(
+      campaign.userId,
+      campaign.id,
+      campaign.message,
+      campaign.imageUrl,
+      campaign.recurrenceDays,
+      audience,
+    );
+  }
   async sendCampaign(userId: string, campaignId: string) {
     const campaign = (await this.campaignService.getCampaignById(
       userId,
@@ -32,6 +69,8 @@ export class CampaignSenderService implements OnModuleInit {
       audience: string;
       name: string;
       message: string;
+      imageUrl: string | null;
+      recurrenceDays: number | null;
     } | null;
     if (!campaign) throw new Error('Campaña no encontrada');
     if (campaign.status === 'enviando') {
@@ -50,7 +89,14 @@ export class CampaignSenderService implements OnModuleInit {
     );
 
     // Procesamos en fondo sin bloquear al controlador
-    void this.processRecipients(userId, campaignId, campaign.message, audience);
+    void this.processRecipients(
+      userId,
+      campaignId,
+      campaign.message,
+      campaign.imageUrl ?? null,
+      campaign.recurrenceDays ?? null,
+      audience,
+    );
 
     return {
       message: 'Envío iniciado',
@@ -63,6 +109,8 @@ export class CampaignSenderService implements OnModuleInit {
     userId: string,
     campaignId: string,
     template: string,
+    imageUrl: string | null,
+    recurrenceDays: number | null,
     audience: Array<{ id: string; name: string; phone: string }>,
   ) {
     // Producto para {{producto}} / {{precio}}: usamos el primero con oferta o el más reciente
@@ -74,7 +122,15 @@ export class CampaignSenderService implements OnModuleInit {
 
       let sent = false;
       try {
-        sent = await this.aiService.sendWhatsAppMessage(client.phone, text);
+        if (imageUrl) {
+          sent = await this.aiService.sendWhatsAppImage(
+            client.phone,
+            imageUrl,
+            text,
+          );
+        } else {
+          sent = await this.aiService.sendWhatsAppMessage(client.phone, text);
+        }
       } catch {
         this.logger.error(`Error enviando a ${client.phone}`);
       }
@@ -90,8 +146,16 @@ export class CampaignSenderService implements OnModuleInit {
       await this.sleep(3000);
     }
 
-    await this.campaignService.markCompleted(campaignId);
-    this.logger.log(`✅ Campaña "${campaignId}" completada`);
+    // 🔁 Si es recurrente: se re-programa sola. Si no: completada.
+    if (recurrenceDays && recurrenceDays > 0) {
+      await this.campaignService.reschedule(campaignId, recurrenceDays);
+      this.logger.log(
+        `🔁 Campaña re-programada para dentro de ${recurrenceDays} días`,
+      );
+    } else {
+      await this.campaignService.markCompleted(campaignId);
+      this.logger.log(`✅ Campaña "${campaignId}" completada`);
+    }
   }
 
   private sleep(ms: number) {

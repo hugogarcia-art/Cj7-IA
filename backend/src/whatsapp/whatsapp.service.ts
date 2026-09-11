@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { optionalEnv } from '../common/env';
 
 const GRAPH_VERSION = 'v20.0';
+const IMAGE_TAG_PATTERN = /\[IMG:([^\]]+)\]/i;
+const IMAGE_TAG_GLOBAL_PATTERN = /\[IMG:[^\]]+\]/gi;
 
 @Injectable()
 export class WhatsAppService {
@@ -82,7 +84,7 @@ export class WhatsAppService {
     if (!ownerId) return;
 
     // Alta/actualización automática del contacto en el CRM.
-    await this.prisma.client.upsert({
+    const client = await this.prisma.client.upsert({
       where: { userId_phone: { userId: ownerId, phone } },
       update: { lastContact: new Date() },
       create: {
@@ -96,18 +98,74 @@ export class WhatsAppService {
       data: { phone, sender: 'user', content: text },
     });
 
+    // 🧠 NUEVO: memoria — últimos 10 mensajes de esta conversación
+    const recentMessages = await this.prisma.message.findMany({
+      where: { phone },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    const history = recentMessages
+      .reverse()
+      .map((message) => ({ sender: message.sender, content: message.content }));
+
+    // Catálogo con fotos disponibles
     const products = await this.prisma.product.findMany({
       where: { userId: ownerId, status: 'Activo' },
       orderBy: { createdAt: 'desc' },
       take: 10,
-      select: { name: true, price: true, stock: true },
+      select: {
+        name: true,
+        price: true,
+        stock: true,
+        imageUrl: true, // <-- NUEVO: para poder enviar fotos
+      },
     });
 
     const aiResponse = await this.aiService.generateWhatsAppResponse(
       text,
-      'Cliente Potencial',
+      client.name,
       AiService.formatInventory(products),
+      history, // <-- NUEVO: la memoria
     );
+
+    // 🖼️ NUEVO: si la IA pidió una foto de producto [IMG:nombre], la enviamos
+    const imgMatch = aiResponse.match(IMAGE_TAG_PATTERN);
+    if (imgMatch) {
+      const requested = imgMatch[1].trim().toLowerCase();
+      const product = products.find(
+        (p) =>
+          p.name.toLowerCase().includes(requested) ||
+          requested.includes(p.name.toLowerCase().split(' ')[0]),
+      );
+
+      if (product?.imageUrl) {
+        const caption = aiResponse.replace(IMAGE_TAG_GLOBAL_PATTERN, '').trim();
+
+        await this.aiService.sendWhatsAppImage(
+          phone,
+          product.imageUrl,
+          caption || `📸 ${product.name}`,
+        );
+        this.logger.log(`🖼️ Foto de "${product.name}" enviada a ${phone}`);
+
+        await this.prisma.message.create({
+          data: {
+            phone,
+            sender: 'ai',
+            content: `[Imagen: ${product.name}] ${caption || ''}`,
+          },
+        });
+        return; // La imagen ya fue la respuesta: terminamos aquí
+      }
+
+      // Producto sin foto disponible: respondemos solo con texto
+      const textOnly = aiResponse.replace(IMAGE_TAG_GLOBAL_PATTERN, '').trim();
+      await this.sendMessage(phone, textOnly);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: textOnly },
+      });
+      return;
+    }
 
     await this.prisma.message.create({
       data: { phone, sender: 'ai', content: aiResponse },

@@ -1,3 +1,4 @@
+import { SaleModule } from './sale/sale.module';
 import { AutomationModule } from './automation/automation.module';
 import { CampaignModule } from './campaign/campaign.module';
 import { Module } from '@nestjs/common';
@@ -32,6 +33,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     CampaignModule,
     EventsModule,
     AutomationModule,
+    SaleModule,
     //QueueModule,
   ],
   controllers: [AppController],

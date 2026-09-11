@@ -74,10 +74,12 @@ export class AutomationService implements OnModuleInit {
 
       for (const client of clients) {
         // Si nunca ha habido contacto (lastContact null) o ya superó el umbral
-        const last = client.lastContact ? new Date(client.lastContact).getTime() : 0;
+        const last = client.lastContact
+          ? new Date(client.lastContact).getTime()
+          : 0;
         const daysSince = Math.floor((now - last) / (24 * 60 * 60 * 1000));
 
-        if (!client.lastContact || daysSince >= automation.daysThreshold) {
+        if (!client.lastContact || now - last >= thresholdMs) {
           results.push({
             userId: automation.userId,
             ownerId: automation.user.id,

@@ -30,6 +30,38 @@ export class ClientService {
     return client;
   }
 
+  // Historial de conversaciones WhatsApp del cliente
+  async getClientMessages(userId: string, clientId: string) {
+    // Verifica que el cliente sea del usuario
+    const client = await this.prisma.client.findFirst({
+      where: { id: clientId, userId },
+    });
+    if (!client) {
+      throw new Error('Cliente no encontrado o no te pertenece.');
+    }
+
+    // Busca los mensajes por teléfono (ordenados cronológicamente)
+    return this.prisma.message.findMany({
+      where: { phone: client.phone },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  // Historial de compras del cliente
+  async getClientSales(userId: string, clientId: string) {
+    const client = await this.prisma.client.findFirst({
+      where: { id: clientId, userId },
+    });
+    if (!client) {
+      throw new Error('Cliente no encontrado o no te pertenece.');
+    }
+
+    return this.prisma.sale.findMany({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   getClientsForExport(userId: string, ids: string[]) {
     return this.prisma.client.findMany({
       // Sin ids seleccionados exportamos todo, pero siempre acotado al dueño.
@@ -143,6 +175,23 @@ export class ClientService {
     }
 
     return results;
+  }
+
+  // Últimos mensajes de WhatsApp de todos los clientes del usuario.
+  async getRecentMessages(userId: string) {
+    const clients = await this.prisma.client.findMany({
+      where: { userId },
+      select: { phone: true },
+    });
+
+    const phones = clients.map((client) => client.phone);
+    if (phones.length === 0) return [];
+
+    return this.prisma.message.findMany({
+      where: { phone: { in: phones } },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
   }
 }
 
