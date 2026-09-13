@@ -24,6 +24,20 @@ model User {
   products    Product[]
   campaigns   Campaign[]
   automations Automation[] 
+  whatsappCredential WhatsAppCredentials?
+}
+
+model WhatsAppCredentials {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  phoneNumberId String
+  wabaId        String?
+  accessToken   String
+  displayPhone  String?
+  verified      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Client {
@@ -71,7 +85,7 @@ model Product {
 model Sale {
   id            String     @id @default(uuid())
   total         Float
-  status        String     @default("Nuevo") // Nuevo, Pendiente, En Proceso, Pagado, Enviado, Completado, Cancelado
+  status        String     @default("Nuevo")
   paymentMethod String?
   notes         String?
   createdAt     DateTime   @default(now())
