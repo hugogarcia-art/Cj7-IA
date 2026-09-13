@@ -226,6 +226,40 @@ export class WhatsAppService {
       );
       return;
     }
+    // 📦 [DATOS]: el cliente envió su nombre completo y/o dirección de entrega
+    const datosMatch = responseToSend.match(/\[DATOS:([^\]]+)\]/i);
+    if (datosMatch) {
+      const [fullName, address] = datosMatch[1]
+        .split('|')
+        .map((part) => part.trim());
+
+      const updateData: { name?: string; notes?: string } = {};
+      if (fullName && fullName !== 'N/D') updateData.name = fullName;
+      if (address && address !== 'N/D') {
+        updateData.notes = `📍 Dirección de entrega: ${address}`;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await this.prisma.client.update({
+          where: { id: client.id },
+          data: updateData,
+        });
+      }
+
+      const ack =
+        '¡Perfecto! 📦 Tus datos de entrega quedaron registrados. Te contactaré pronto para coordinar. 🚚✨';
+      await this.sendMessage(phone, ack);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: ack },
+      });
+
+      await this.notifyOwner(
+        `📦 DATOS DE ENTREGA recibidos:\nCliente: ${client.name} (${phone})\nNombre: ${
+          fullName || 'N/D'
+        }\nDirección: ${address || 'N/D'}\n\nContacta al cliente para coordinar la entrega 🚚`,
+      );
+      return;
+    }
 
     await this.sendMessage(phone, responseToSend);
     await this.prisma.message.create({
@@ -298,12 +332,53 @@ export class WhatsAppService {
     }
 
     // Analiza con Vision AI y registra la venta si es válida.
-    await this.paymentVision.processPaymentProof(
+    const analysis = await this.paymentVision.processPaymentProof(
       ownerId,
       client.name,
       phone,
       buffer,
     );
+
+    if (analysis.isPaymentProof) {
+      // ✅ Confirmación al CLIENTE (con memoria de la conversación)
+      const recentMessages = await this.prisma.message.findMany({
+        where: { phone },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+      const history = recentMessages.reverse().map((message) => ({
+        sender: message.sender,
+        content: message.content,
+      }));
+
+      const catalog = await this.prisma.product.findMany({
+        where: { userId: ownerId, status: 'Activo' },
+        take: 10,
+        select: { name: true, price: true, stock: true },
+      });
+
+      const confirmation = await this.aiService.generatePaymentConfirmation(
+        analysis.amount,
+        AiService.formatInventory(catalog),
+        client.name,
+        history,
+      );
+
+      await this.sendMessage(phone, confirmation);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: confirmation },
+      });
+      this.logger.log(
+        `💳 Pago verificado de ${analysis.amount ?? '?'} Bs a ${phone} — confirmación enviada`,
+      );
+    } else {
+      const msg =
+        'Hmm, no pude verificar esa imagen como comprobante de pago 😅 ¿puedes enviar una foto más clara de tu recibo o transferencia?';
+      await this.sendMessage(phone, msg);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: msg },
+      });
+    }
   }
 
   private async sendMessage(phone: string, body: string): Promise<void> {
