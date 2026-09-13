@@ -1,13 +1,9 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class SaleService implements OnModuleInit {
-  private prisma = new PrismaClient();
-
-  async onModuleInit() {
-    await this.prisma.$connect();
-  }
+export class SaleService {
+  constructor(private readonly prisma: PrismaService) {}
 
   // Crear venta (valida que el cliente sea del usuario)
   async createSale(

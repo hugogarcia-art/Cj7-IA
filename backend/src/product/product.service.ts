@@ -37,6 +37,7 @@ export class ProductService {
     userId: string,
     data: CreateProductDto,
     file: UploadedImage | undefined,
+    extraFiles: UploadedImage[] = [],
   ) {
     const price = toFloat(data.price);
     if (price === null || price < 0) {
@@ -46,6 +47,19 @@ export class ProductService {
     const imageUrl = file
       ? await this.storageService.uploadImage(file, userId)
       : undefined;
+    const extraImages: string[] = [];
+    for (const [index, extra] of extraFiles.entries()) {
+      try {
+        extraImages.push(
+          await this.storageService.uploadImage(
+            extra,
+            `${userId}/producto-extra-${Date.now()}-${index}`,
+          ),
+        );
+      } catch {
+        // Una imagen adicional no debe impedir guardar el producto.
+      }
+    }
 
     try {
       return await this.prisma.product.create({
@@ -60,6 +74,7 @@ export class ProductService {
           stock: toInt(data.stock) ?? 0,
           minStock: toInt(data.minStock) ?? 0,
           imageUrl,
+          extraImages,
           status: data.status ?? 'Activo',
           userId,
         },
@@ -77,10 +92,11 @@ export class ProductService {
     id: string,
     data: UpdateProductDto,
     file: UploadedImage | undefined,
+    extraFiles: UploadedImage[] = [],
   ) {
     const existing = await this.prisma.product.findFirst({
       where: { id, userId },
-      select: { id: true },
+      select: { id: true, extraImages: true },
     });
     if (!existing) throw new NotFoundException('Producto no encontrado');
 
@@ -95,6 +111,19 @@ export class ProductService {
     const imageUrl = file
       ? await this.storageService.uploadImage(file, userId)
       : undefined;
+    const extraImages: string[] = [];
+    for (const [index, extra] of extraFiles.entries()) {
+      try {
+        extraImages.push(
+          await this.storageService.uploadImage(
+            extra,
+            `${userId}/producto-extra-${Date.now()}-${index}`,
+          ),
+        );
+      } catch {
+        // Una imagen adicional no debe impedir actualizar el producto.
+      }
+    }
 
     try {
       return await this.prisma.product.update({
@@ -117,6 +146,9 @@ export class ProductService {
               ? (toInt(data.minStock) ?? 0)
               : undefined,
           imageUrl,
+          ...(extraImages.length > 0
+            ? { extraImages: { push: extraImages } }
+            : {}),
           status: data.status,
         },
       });

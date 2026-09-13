@@ -2,22 +2,28 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { AutomationService } from './automation.service';
 import { AiService } from '../ai/ai.service';
-import { PrismaClient } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class RemarketingService implements OnModuleInit {
   private readonly logger = new Logger(RemarketingService.name);
-  private prisma = new PrismaClient();
 
   constructor(
     private readonly automationService: AutomationService,
     private readonly aiService: AiService,
+    private readonly prisma: PrismaService,
   ) {}
 
-  async onModuleInit() {
-    await this.prisma.$connect();
+  onModuleInit() {
     // Ejecuta una revisión al arrancar (tras 10 segundos para no chocar con el arranque)
-    setTimeout(() => void this.runRemarketing(), 10_000);
+    setTimeout(() => {
+      this.runRemarketing().catch((error: unknown) => {
+        this.logger.error(
+          'Error en la revisión inicial de remarketing:',
+          error,
+        );
+      });
+    }, 10_000);
   }
 
   // ⏰ EL DESPERTADOR: corre cada 24 horas (y al arrancar)

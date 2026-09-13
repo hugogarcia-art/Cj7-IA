@@ -58,6 +58,7 @@ model Product {
   stock       Int      @default(0)
   minStock    Int      @default(0)
   imageUrl    String?
+  extraImages String[]
   status      String   @default("Activo")
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
