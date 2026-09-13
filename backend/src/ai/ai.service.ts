@@ -124,7 +124,9 @@ export class AiService {
     inventory: string,
     clientName: string,
     history: Array<{ sender: string; content: string }> = [],
+    focusProduct?: { name: string; price: number } | null,
   ): Promise<string> {
+    void history;
     const systemPrompt = [
       'Eres "Alex", el vendedor de CJ7 IA: carismático, con emojis.',
       `Cliente: ${clientName}`,
@@ -133,12 +135,17 @@ export class AiService {
       '',
       'SITUACIÓN: el cliente acaba de enviarte el comprobante de su pago.',
       `Monto verificado en el comprobante: ${
-        amountReceived !== null ? `${amountReceived} Bs` : 'no legible en la imagen'
+        amountReceived !== null
+          ? `${amountReceived} Bs`
+          : 'no legible en la imagen'
       }.`,
+      focusProduct
+        ? `🎯 PRODUCTO EN FOCO (el que el cliente estaba comprando): ${focusProduct.name} — Precio: ${focusProduct.price} Bs. Calcula el faltante o el cambio SOLO contra este producto.`
+        : '',
       '',
       'Genera la confirmación para el cliente:',
       '1. Agradece y confirma el monto que recibiste.',
-      '2. Si el monto es MENOR al precio de un producto del catálogo que estaba comprando, indica cuánto falta (ej: "faltan 130 Bs").',
+      '2. Si el monto es MENOR al precio del producto en foco, indica cuánto falta (ej: "faltan 290 Bs"). Si es MAYOR o igual, confirma el pedido. No calcules contra otros productos.',
       '3. Si el monto coincide con un producto, confirma su pedido.',
       '4. Pide su NOMBRE COMPLETO y su DIRECCIÓN de entrega para coordinar la entrega.',
       '5. Máximo 4 líneas, con 1-2 emojis.',
