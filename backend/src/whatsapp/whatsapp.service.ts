@@ -151,7 +151,7 @@ export class WhatsAppService {
         );
         this.logger.log(`🖼️ Foto de "${product.name}" enviada a ${phone}`);
 
-        const extraImage = product.extraImages[0];
+        const [extraImage] = product.extraImages;
         if (extraImage) {
           await this.aiService.sendWhatsAppImage(
             phone,
@@ -179,11 +179,65 @@ export class WhatsAppService {
       return;
     }
 
-    await this.prisma.message.create({
-      data: { phone, sender: 'ai', content: aiResponse },
-    });
+    // 🏷️ Procesar tags especiales ANTES de enviar al cliente
+    let responseToSend = aiResponse;
 
-    await this.sendMessage(phone, aiResponse);
+    // [ASESOR]: derivar a asesor humano + notificar al dueño
+    if (/\[ASESOR\]/i.test(responseToSend)) {
+      responseToSend = responseToSend.replace(/\[ASESOR\]/gi, '').trim();
+      const advisorMessage =
+        responseToSend ||
+        'Perfecto 😊 Un asesor humano de nuestro equipo se pondrá en contacto contigo en breve para ayudarte con tu pedido.';
+
+      await this.sendMessage(phone, advisorMessage);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: advisorMessage },
+      });
+
+      await this.notifyOwner(
+        `🔔 ${client.name} (${phone}) solicita un ASESOR HUMANO.\nSu último mensaje: "${text}"\nContéstale pronto para no perder la venta. 🙋`,
+      );
+      return;
+    }
+
+    // 💰 [VENTA]: el cliente confirmó la compra
+    if (/\[VENTA\]/i.test(responseToSend)) {
+      responseToSend = responseToSend.replace(/\[VENTA\]/gi, '').trim();
+
+      await this.sendMessage(phone, responseToSend);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: responseToSend },
+      });
+
+      // Registra la venta en el Pipeline (monto por confirmar)
+      const sale = await this.prisma.sale.create({
+        data: {
+          clientId: client.id,
+          total: 0,
+          status: 'Nuevo',
+          paymentMethod: 'Por confirmar',
+          notes: `Venta detectada por IA en conversación. Último mensaje: "${text}"`,
+        },
+      });
+      void sale;
+
+      await this.notifyOwner(
+        `💰 ¡VENTA DETECTADA POR LA IA! 🔥\nCliente: ${client.name} (${phone})\nRegistrada en el Pipeline como "Nuevo".\nRevisa el monto y ajústalo si es necesario.`,
+      );
+      return;
+    }
+
+    await this.sendMessage(phone, responseToSend);
+    await this.prisma.message.create({
+      data: { phone, sender: 'ai', content: responseToSend },
+    });
+  }
+
+  // 🔔 Notifica al dueño por WhatsApp (requiere OWNER_NOTIFY_PHONE en .env)
+  private async notifyOwner(message: string): Promise<void> {
+    const ownerPhone = process.env.OWNER_NOTIFY_PHONE;
+    if (!ownerPhone) return;
+    await this.sendMessage(ownerPhone, message);
   }
   // Descarga la imagen que el cliente envió (por mediaId de Meta)
   private async downloadMedia(mediaId: string): Promise<Buffer | null> {
