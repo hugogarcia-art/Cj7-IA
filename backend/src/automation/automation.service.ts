@@ -1,13 +1,9 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class AutomationService implements OnModuleInit {
-  private prisma = new PrismaClient();
-
-  async onModuleInit() {
-    await this.prisma.$connect();
-  }
+export class AutomationService {
+  constructor(private readonly prisma: PrismaService) {}
 
   // Obtener el estado del remarketing del usuario
   async getStatus(userId: string) {

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { AiService } from '../ai/ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { optionalEnv } from '../common/env';
+import { PaymentVisionService } from '../payment/payment.service';
 
 const GRAPH_VERSION = 'v20.0';
 const IMAGE_TAG_PATTERN = /\[IMG:([^\]]+)\]/i;
@@ -15,18 +16,13 @@ export class WhatsAppService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiService: AiService,
+    private readonly paymentVision: PaymentVisionService,
   ) {}
 
   get verifyToken(): string {
     return optionalEnv('WHATSAPP_VERIFY_TOKEN');
   }
 
-  /**
-   * Comprueba la firma X-Hub-Signature-256 de Meta contra el App Secret.
-   *
-   * Sin esto, cualquiera que conozca la URL del webhook puede inyectar
-   * mensajes falsos, llenar el CRM y gastar tu crédito de OpenAI.
-   */
   verifySignature(
     rawBody: Buffer | undefined,
     signatureHeader?: string,
@@ -117,15 +113,22 @@ export class WhatsAppService {
         name: true,
         price: true,
         stock: true,
-        imageUrl: true, // <-- NUEVO: para poder enviar fotos
+        imageUrl: true,
+        extraImages: true,
+        description: true,
       },
     });
+    const productDescriptions = products
+      .filter((product) => product.description?.trim())
+      .map((product) => `- ${product.name}: ${product.description}`)
+      .join('\n');
 
     const aiResponse = await this.aiService.generateWhatsAppResponse(
       text,
       client.name,
       AiService.formatInventory(products),
       history, // <-- NUEVO: la memoria
+      productDescriptions,
     );
 
     // 🖼️ NUEVO: si la IA pidió una foto de producto [IMG:nombre], la enviamos
@@ -147,6 +150,15 @@ export class WhatsAppService {
           caption || `📸 ${product.name}`,
         );
         this.logger.log(`🖼️ Foto de "${product.name}" enviada a ${phone}`);
+
+        const extraImage = product.extraImages[0];
+        if (extraImage) {
+          await this.aiService.sendWhatsAppImage(
+            phone,
+            extraImage,
+            `✨ Otra vista de ${product.name}`,
+          );
+        }
 
         await this.prisma.message.create({
           data: {
@@ -172,6 +184,72 @@ export class WhatsAppService {
     });
 
     await this.sendMessage(phone, aiResponse);
+  }
+  // Descarga la imagen que el cliente envió (por mediaId de Meta)
+  private async downloadMedia(mediaId: string): Promise<Buffer | null> {
+    const metaToken = optionalEnv('META_TOKEN');
+    if (!metaToken) return null;
+
+    try {
+      // 1. Pide la URL temporal del archivo
+      const urlRes = await fetch(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`,
+        { headers: { Authorization: `Bearer ${metaToken}` } },
+      );
+      if (!urlRes.ok) return null;
+      const urlData = (await urlRes.json()) as { url?: string };
+      if (!urlData.url) return null;
+
+      // 2. Descarga el archivo
+      const fileRes = await fetch(urlData.url, {
+        headers: { Authorization: `Bearer ${metaToken}` },
+      });
+      if (!fileRes.ok) return null;
+
+      const arrayBuffer = await fileRes.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch {
+      return null;
+    }
+  }
+
+  // Detecta si el mensaje es una imagen (comprobante de pago)
+  async handleIncomingImage(phone: string, imageId: string): Promise<void> {
+    const ownerId = await this.resolveOwnerId();
+    if (!ownerId) return;
+
+    // Iguala el flujo del texto: guarda al cliente + el mensaje de imagen
+    const client = await this.prisma.client.upsert({
+      where: { userId_phone: { userId: ownerId, phone } },
+      update: { lastContact: new Date() },
+      create: {
+        name: `Cliente WhatsApp ${phone}`,
+        phone,
+        userId: ownerId,
+      },
+    });
+
+    await this.prisma.message.create({
+      data: { phone, sender: 'user', content: '[El cliente envió una imagen]' },
+    });
+
+    // Descarga la imagen
+    const buffer = await this.downloadMedia(imageId);
+    if (!buffer) {
+      await this.sendMessage(
+        phone,
+        'No pude descargar tu imagen 😅 ¿puedes reenviarla?',
+      );
+      return;
+    }
+
+    // Analiza con Vision AI y registra la venta si es válida.
+    await this.paymentVision.processPaymentProof(
+      ownerId,
+      client.name,
+      phone,
+      buffer,
+    );
   }
 
   private async sendMessage(phone: string, body: string): Promise<void> {

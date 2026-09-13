@@ -23,6 +23,7 @@ type WhatsAppWebhookBody = {
           from?: string;
           type?: string;
           text?: { body?: string };
+          image?: { id?: string };
         }[];
       };
     }[];
@@ -76,8 +77,23 @@ export class WhatsAppController {
     // 3. Luego procesa EN SEGUNDO PLANO (sin await)
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     const phone = message?.from;
-    const text = message?.text?.body;
-    if (!phone || !text) return;
+    if (!phone) return;
+
+    // Si el cliente envió una imagen, se procesa como comprobante de pago.
+    if (message.type === 'image' && message.image?.id) {
+      try {
+        await this.whatsappService.handleIncomingImage(phone, message.image.id);
+      } catch (error: unknown) {
+        this.logger.error(
+          `Error procesando imagen de ${phone}: ${describeError(error)}`,
+        );
+      }
+      return;
+    }
+
+    // El flujo de texto existente se mantiene intacto.
+    const text = message.text?.body;
+    if (!text) return;
 
     try {
       await this.whatsappService.handleIncomingMessage(phone, text);

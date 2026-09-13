@@ -7,10 +7,10 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
-  UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ProductService } from './product.service';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 import {
@@ -23,10 +23,15 @@ import {
 } from '../storage/storage.service';
 
 // Nest ya traduce los errores de multer a HttpException, asi que pasarse del
-// limite devuelve un 413 "File too large" y no un 500. No hace falta filtro.
-const imageUpload = FileInterceptor('file', {
-  limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
-});
+const imageUpload = FileFieldsInterceptor(
+  [
+    { name: 'file', maxCount: 1 },
+    { name: 'extraImages', maxCount: 5 },
+  ],
+  {
+    limits: { fileSize: MAX_IMAGE_BYTES, files: 6 },
+  },
+);
 
 @Controller('products')
 export class ProductController {
@@ -42,9 +47,18 @@ export class ProductController {
   createProduct(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: CreateProductDto,
-    @UploadedFile() file: UploadedImage | undefined,
+    @UploadedFiles()
+    files: {
+      file?: UploadedImage[];
+      extraImages?: UploadedImage[];
+    },
   ) {
-    return this.productService.createProduct(user.id, body, file);
+    return this.productService.createProduct(
+      user.id,
+      body,
+      files.file?.[0],
+      files.extraImages,
+    );
   }
 
   @Put(':id')
@@ -53,9 +67,19 @@ export class ProductController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateProductDto,
-    @UploadedFile() file: UploadedImage | undefined,
+    @UploadedFiles()
+    files: {
+      file?: UploadedImage[];
+      extraImages?: UploadedImage[];
+    },
   ) {
-    return this.productService.updateProduct(user.id, id, body, file);
+    return this.productService.updateProduct(
+      user.id,
+      id,
+      body,
+      files.file?.[0],
+      files.extraImages,
+    );
   }
 
   @Delete(':id')

@@ -1,13 +1,10 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class CampaignService implements OnModuleInit {
-  private prisma = new PrismaClient();
-
-  onModuleInit() {
-    // Intentionally left blank; Prisma client is initialized lazily.
-  }
+export class CampaignService {
+  constructor(private readonly prisma: PrismaService) {}
 
   // Listar campañas del usuario
   getCampaigns(userId: string) {

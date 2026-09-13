@@ -18,6 +18,7 @@ type Product = {
   stock: number;
   minStock?: number;
   imageUrl?: string;
+  extraImages?: string[];
   status?: string;
   createdAt: string;
 };
@@ -29,6 +30,7 @@ export default function InventarioPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [extraFiles, setExtraFiles] = useState<File[]>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -75,6 +77,7 @@ export default function InventarioPage() {
   const openNewModal = () => {
     setEditingProduct(null);
     setSelectedFile(null);
+    setExtraFiles([]);
     setImagePreview(null);
     setFormData({ name: "", description: "", category: "", sku: "", price: "", offerPrice: "", cost: "", stock: "", minStock: "", status: "Activo" });
     setIsModalOpen(true);
@@ -83,6 +86,7 @@ export default function InventarioPage() {
   const openEditModal = (product: Product) => {
     setEditingProduct(product);
     setSelectedFile(null);
+    setExtraFiles([]);
     setImagePreview(product.imageUrl || null);
     setFormData({
       name: product.name,
@@ -135,6 +139,9 @@ export default function InventarioPage() {
       if (formData.minStock) fd.append("minStock", formData.minStock);
       fd.append("status", formData.status);
       if (selectedFile) fd.append("file", selectedFile);
+      for (const extra of extraFiles) {
+        fd.append("extraImages", extra);
+      }
 
       await apiFetch(
         editingProduct ? `/products/${editingProduct.id}` : "/products",
@@ -327,6 +334,25 @@ export default function InventarioPage() {
                       <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
                     </label>
                   </div>
+                  <label className="mt-3 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 py-2.5 rounded-xl font-medium text-xs flex items-center justify-center gap-2 cursor-pointer hover:bg-primary/5">
+                    <ImageIcon size={14} /> Fotos adicionales (hasta 5)
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) =>
+                        setExtraFiles(
+                          Array.from(e.target.files || []).slice(0, 5),
+                        )
+                      }
+                    />
+                  </label>
+                  {extraFiles.length > 0 && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      {extraFiles.length} foto{extraFiles.length === 1 ? "" : "s"} adicional{extraFiles.length === 1 ? "" : "es"} seleccionada{extraFiles.length === 1 ? "" : "s"}
+                    </p>
+                  )}
                 </div>
 
                 <div>

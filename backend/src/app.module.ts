@@ -15,6 +15,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProductModule } from './product/product.module';
 import { StorageModule } from './storage/storage.module';
 import { EventsModule } from './events/events.module';
+import { PaymentModule } from './payment/payment.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 //import { QueueModule } from './queue/queue.module';
 
@@ -34,6 +35,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     EventsModule,
     AutomationModule,
     SaleModule,
+    PaymentModule,
     //QueueModule,
   ],
   controllers: [AppController],

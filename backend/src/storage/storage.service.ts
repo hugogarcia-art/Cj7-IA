@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
-import { randomUUID } from 'node:crypto';
 import { optionalEnv } from '../common/env';
 import { describeError } from '../common/errors';
 
@@ -21,6 +20,14 @@ export type UploadedImage = {
 
 @Injectable()
 export class StorageService {
+  private validateImageMimeType(mimetype: string): void {
+    if (!ALLOWED_MIME_TYPES[mimetype]) {
+      throw new BadRequestException(
+        `Tipo de archivo no permitido. Usa uno de: ${Object.keys(ALLOWED_MIME_TYPES).join(', ')}.`,
+      );
+    }
+  }
+
   private readonly logger = new Logger(StorageService.name);
   private readonly bucket = optionalEnv('SUPABASE_BUCKET', 'cj7-productos');
   private client: ReturnType<typeof createClient> | null = null;
@@ -65,35 +72,23 @@ export class StorageService {
    * validado: así nadie sube un .html o sobrescribe la imagen de otro producto
    * eligiendo el nombre de archivo.
    */
-  async uploadImage(file: UploadedImage, userId: string): Promise<string> {
-    const extension = ALLOWED_MIME_TYPES[file.mimetype];
-    if (!extension) {
-      throw new BadRequestException(
-        'Formato de imagen no permitido. Usa JPG, PNG, WEBP o GIF.',
-      );
-    }
-
-    const size = file.size ?? file.buffer.length;
-    if (size > MAX_IMAGE_BYTES) {
-      throw new BadRequestException('La imagen no puede pesar más de 5 MB.');
-    }
+  async uploadImage(
+    file: { buffer: Buffer; mimetype: string },
+    fileName: string,
+  ): Promise<string> {
+    // Convierte SIEMPRE a JPG (Meta no acepta WEBP en la API)
+    const sharp = (await import('sharp')).default;
+    const jpgBuffer = await sharp(file.buffer).jpeg({ quality: 90 }).toBuffer();
 
     const supabase = this.getClient();
-    const path = `${userId}/${randomUUID()}.${extension}`;
-
     const { error } = await supabase.storage
       .from(this.bucket)
-      .upload(path, file.buffer, {
-        contentType: file.mimetype,
-        cacheControl: '31536000',
-      });
+      .upload(fileName, jpgBuffer, { contentType: 'image/jpeg' });
 
-    if (error) {
-      this.logger.error(`Error subiendo imagen a Supabase: ${error.message}`);
-      throw new BadRequestException('No se pudo subir la imagen.');
-    }
+    if (error) throw error;
 
-    return supabase.storage.from(this.bucket).getPublicUrl(path).data.publicUrl;
+    return supabase.storage.from(this.bucket).getPublicUrl(fileName).data
+      .publicUrl;
   }
 
   /**
