@@ -200,7 +200,8 @@ export class WhatsAppService {
       return;
     }
 
-    // 💰 [VENTA]: el cliente confirmó la compra
+    // 💰 [VENTA]: el cliente mostró interés → registra como lead (SIN notificar:
+    // el dueño solo recibe alertas de comprobantes verificados y datos de entrega)
     if (/\[VENTA\]/i.test(responseToSend)) {
       responseToSend = responseToSend.replace(/\[VENTA\]/gi, '').trim();
 
@@ -209,21 +210,16 @@ export class WhatsAppService {
         data: { phone, sender: 'ai', content: responseToSend },
       });
 
-      // Registra la venta en el Pipeline (monto por confirmar)
-      const sale = await this.prisma.sale.create({
+      // Registra la venta en el Pipeline (monto por confirmar) — silencioso
+      await this.prisma.sale.create({
         data: {
           clientId: client.id,
           total: 0,
           status: 'Nuevo',
           paymentMethod: 'Por confirmar',
-          notes: `Venta detectada por IA en conversación. Último mensaje: "${text}"`,
+          notes: `Interés detectado por IA. Último mensaje: "${text}"`,
         },
       });
-      void sale;
-
-      await this.notifyOwner(
-        `💰 ¡VENTA DETECTADA POR LA IA! 🔥\nCliente: ${client.name} (${phone})\nRegistrada en el Pipeline como "Nuevo".\nRevisa el monto y ajústalo si es necesario.`,
-      );
       return;
     }
     // 📦 [DATOS]: el cliente envió su nombre completo y/o dirección de entrega
@@ -266,7 +262,25 @@ export class WhatsAppService {
       data: { phone, sender: 'ai', content: responseToSend },
     });
   }
-
+  // 🎯 Detecta el producto del que se estaba hablando en el historial
+  private detectFocusProduct(
+    history: Array<{ sender: string; content: string }>,
+    products: Array<{ name: string; price: number }>,
+  ): { name: string; price: number } | null {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const content = history[i].content.toLowerCase();
+      for (const product of products) {
+        const words = product.name
+          .toLowerCase()
+          .split(' ')
+          .filter((word) => word.length > 3);
+        if (words.some((word) => content.includes(word))) {
+          return product;
+        }
+      }
+    }
+    return null;
+  }
   // 🔔 Notifica al dueño por WhatsApp (requiere OWNER_NOTIFY_PHONE en .env)
   private async notifyOwner(message: string): Promise<void> {
     const ownerPhone = process.env.OWNER_NOTIFY_PHONE;
@@ -357,11 +371,15 @@ export class WhatsAppService {
         select: { name: true, price: true, stock: true },
       });
 
+      // 🎯 Detecta el producto en foco (del que hablaban antes del pago)
+      const focusProduct = this.detectFocusProduct(history, catalog);
+
       const confirmation = await this.aiService.generatePaymentConfirmation(
         analysis.amount,
         AiService.formatInventory(catalog),
         client.name,
         history,
+        focusProduct,
       );
 
       await this.sendMessage(phone, confirmation);
