@@ -24,6 +24,7 @@ model User {
   products    Product[]
   campaigns   Campaign[]
   automations Automation[] 
+  testimonials Testimonial[]
   whatsappCredential WhatsAppCredentials?
 }
 
@@ -60,6 +61,7 @@ model Client {
 }
 
 model Product {
+  
   id          String   @id @default(uuid())
   name        String
   description String?
@@ -73,10 +75,12 @@ model Product {
   minStock    Int      @default(0)
   imageUrl    String?
   extraImages String[]
+  testimonials Testimonial[]
   status      String   @default("Activo")
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String
+  
 
   @@unique([userId, sku])
   @@index([userId, createdAt])
@@ -128,4 +132,16 @@ model Automation {
   daysThreshold Int  @default(3)     // Cada cuántos días
   userId    String
   user      User     @relation(fields: [userId], references: [id])
+}
+model Testimonial {
+  id         String   @id @default(uuid())
+  title      String   // "Cliente satisfecha — La Paz"
+  content    String   // "Compré el Xol Moringa y en 2 semanas me sentí con más energía..."
+  imageUrl   String?  // Captura del testimonio o foto
+  product    Product? @relation(fields: [productId], references: [id])
+  productId  String?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
 }
