@@ -1,8 +1,19 @@
-import sharp from 'sharp';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 import { optionalEnv } from '../common/env';
 import { describeError } from '../common/errors';
+
+/**
+ * Sharp se carga con require directo: el paquete exporta estilo CJS
+ * (`export =`) y el acceso `.default` de los imports de ES da undefined
+ * en runtime ("sharp is not a function"). El cast declara solo lo que usamos.
+ */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sharp = require('sharp') as (input: Buffer) => {
+  jpeg: (options?: { quality?: number }) => {
+    toBuffer: () => Promise<Buffer>;
+  };
+};
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 export const MAX_VIDEO_BYTES = 16 * 1024 * 1024; // 16 MB (límite de Meta)
@@ -91,7 +102,14 @@ export class StorageService {
       .from(this.bucket)
       .upload(fileName, jpgBuffer, { contentType: 'image/jpeg' });
 
-    if (error) throw error;
+    if (error) {
+      // El error de Supabase trae statusCode como STRING ("409") y Nest no
+      // puede responder con él ("Invalid status code"). Lo convertimos en
+      // una excepción HTTP válida con mensaje claro.
+      throw new BadRequestException(
+        `No se pudo subir la imagen: ${error.message}`,
+      );
+    }
 
     return supabase.storage.from(this.bucket).getPublicUrl(fileName).data
       .publicUrl;

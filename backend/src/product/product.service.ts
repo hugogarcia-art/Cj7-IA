@@ -45,8 +45,13 @@ export class ProductService {
       throw new BadRequestException('El precio no es válido.');
     }
 
+    // Nombre único por timestamp: sin esto, la 2ª imagen principal del
+    // usuario choca con la 1ª en Supabase (409 conflict)
     const imageUrl = file
-      ? await this.storageService.uploadImage(file, userId)
+      ? await this.storageService.uploadImage(
+          file,
+          `${userId}/producto-${Date.now()}`,
+        )
       : undefined;
     const videoUrl = video
       ? await this.storageService.uploadVideo(
@@ -117,8 +122,13 @@ export class ProductService {
     }
 
     // Solo reemplazamos la imagen si suben una nueva; si no, se conserva.
+    // Nombre único por timestamp: sin esto, la 2ª imagen principal del
+    // usuario choca con la 1ª en Supabase (409 conflict)
     const imageUrl = file
-      ? await this.storageService.uploadImage(file, userId)
+      ? await this.storageService.uploadImage(
+          file,
+          `${userId}/producto-${Date.now()}`,
+        )
       : undefined;
     const videoUrl = video
       ? await this.storageService.uploadVideo(
