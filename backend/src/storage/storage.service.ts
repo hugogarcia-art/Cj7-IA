@@ -98,9 +98,11 @@ export class StorageService {
     const jpgBuffer = await sharp(file.buffer).jpeg({ quality: 90 }).toBuffer();
 
     const supabase = this.getClient();
+    // Sharp SIEMPRE convierte a JPG: guardamos el archivo con su extensión
+    const path = `${fileName}.jpg`;
     const { error } = await supabase.storage
       .from(this.bucket)
-      .upload(fileName, jpgBuffer, { contentType: 'image/jpeg' });
+      .upload(path, jpgBuffer, { contentType: 'image/jpeg' });
 
     if (error) {
       // El error de Supabase trae statusCode como STRING ("409") y Nest no
@@ -111,7 +113,7 @@ export class StorageService {
       );
     }
 
-    return supabase.storage.from(this.bucket).getPublicUrl(fileName).data
+    return supabase.storage.from(this.bucket).getPublicUrl(path).data
       .publicUrl;
   }
 
