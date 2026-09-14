@@ -16,6 +16,7 @@ type VisionResult = {
   /** ID de la venta creada, si corresponde. */
   saleId?: string | null;
   recipient?: string | null;
+  wrongAccount?: boolean;
 };
 
 @Injectable()
@@ -51,6 +52,14 @@ export class PaymentVisionService {
           ? catalogPrices[0]
           : null;
 
+    // 🚨 ¿El dinero fue a NUESTRA cuenta o a otra?
+    const recipient = analysis.recipient ?? null;
+    const expectedWords = this.getExpectedTitulars();
+    const wrongAccount =
+      !!recipient &&
+      expectedWords.length > 0 &&
+      !expectedWords.some((word) => recipient.toLowerCase().includes(word));
+
     // 2. El cliente SIEMPRE existe antes de crear la venta (antes se usaba
     // el id del User como clientId y rompía la clave foránea)
     const client = await this.prisma.client.findFirst({
@@ -79,6 +88,7 @@ export class PaymentVisionService {
         status: null,
         expectedAmount: expected,
         missingAmount: null,
+        wrongAccount: false,
       });
       return { ...analysis, saleStatus: null, saleId: null };
     }
@@ -113,6 +123,11 @@ export class PaymentVisionService {
       missingAmount = expected;
     }
 
+    // 🚨 Dinero a otra cuenta: NUNCA cuenta como Pagado
+    if (wrongAccount) {
+      status = 'Pendiente';
+    }
+
     // 4. Registra la venta en el Pipeline con el estado correcto
     const sale = await this.prisma.sale.create({
       data: {
@@ -141,6 +156,7 @@ export class PaymentVisionService {
       status,
       expectedAmount: expected,
       missingAmount,
+      wrongAccount,
     });
 
     return {
@@ -149,7 +165,19 @@ export class PaymentVisionService {
       expectedAmount: expected,
       missingAmount,
       saleId: sale.id,
+      wrongAccount,
     };
+  }
+
+  /** Palabras del titular real según PAYMENT_INFO (ej: "hugo quispe garcia") */
+  private getExpectedTitulars(): string[] {
+    const info = process.env.PAYMENT_INFO ?? '';
+    const match = info.match(/Titular:\s*([^|]+)/i);
+    if (!match) return [];
+    return match[1]
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 3);
   }
 
   // 🔔 Notifica al dueño. Cubre 3 escenarios:
@@ -163,6 +191,7 @@ export class PaymentVisionService {
     status: 'Pagado' | 'Pendiente' | null;
     expectedAmount: number | null;
     missingAmount: number | null;
+    wrongAccount: boolean;
     recipient?: string | null;
   }): Promise<void> {
     const phoneNumberId = process.env.PHONE_NUMBER_ID;
@@ -203,6 +232,9 @@ export class PaymentVisionService {
           ? `Precio esperado: ${params.expectedAmount} Bs\nFALTAN: ${params.missingAmount} Bs\n`
           : `Monto no coincide con ningún producto del catálogo (o ilegible) — revisa manualmente\n`) +
         `Método: ${method}\n` +
+        (params.wrongAccount
+          ? `🚨 ATENCIÓN: el dinero fue a OTRA CUENTA (${analysis.recipient ?? 'N/D'}), no a la tuya. NO despaches.\n`
+          : '') +
         `Destino del dinero: ${analysis.recipient ?? 'N/D'}\n` +
         (saleId
           ? `Venta #${saleId.slice(0, 8)} quedó como PENDIENTE en el Pipeline.`

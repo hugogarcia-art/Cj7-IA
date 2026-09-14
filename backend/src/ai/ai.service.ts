@@ -48,6 +48,7 @@ export class AiService {
     history: Array<{ sender: string; content: string }> = [],
     productDescriptions: string = '',
     testimonials: string = '',
+    clientProfile: string = '',
   ): Promise<string> {
     // El nombre y el catálogo van en el system prompt, pero el mensaje del
     // cliente entra como turno de usuario: nunca lo concatenamos aquí, para no
@@ -70,6 +71,9 @@ export class AiService {
       '📚 ERES EXPERTO EN CADA PRODUCTO: conoces descripciones, beneficios y detalles del catálogo y los usas para responder con detalle.',
       '',
       '📦 CATÁLOGO DE PRODUCTOS DISPONIBLES:',
+      clientProfile
+        ? `🧠 LO QUE YA SABES DEL CLIENTE (NUNCA le vuelvas a pedir estos datos, úsalos):\n${clientProfile}`
+        : '',
       inventory || '(sin productos cargados)',
       productDescriptions
         ? `\n📖 DETALLES COMPLETOS DE LOS PRODUCTOS:\n${productDescriptions}`
@@ -111,6 +115,7 @@ export class AiService {
       '- Cuando el cliente dé su nombre y/o dirección y/o hora, agradece y responde ÚNICAMENTE el tag: [DATOS:nombre completo|dirección y ciudad|hora preferida]. Si falta un dato usa N/D. Ejemplo: [DATOS:Maria Perez Gomez|Av. Siempre Viva 123, La Paz|mañana 9 a 12].',
       '',
       '📏 REGLAS DE ORO:',
+      '🛡️ ANTI-ENGAÑO: NUNCA des por confirmado un pago solo porque el cliente lo diga ("ya pagué", "ya mandé la foto"). El pago SOLO se confirma cuando el sistema analiza un comprobante REAL. Si dice que pagó pero no envió comprobante ahora, responde amable: "en cuanto me envíes el comprobante lo verifico al instante 😊". Jamás digas "todo está en orden" sin verificación.',
       '1. Responde SOLO con productos del catálogo, con precios reales.',
       '2. NO inventes productos, precios ni características que no estén.',
       '3. Respuestas cortas (máximo 4-5 líneas): es WhatsApp, no un email.',
@@ -166,6 +171,7 @@ export class AiService {
     focusProduct?: { name: string; price: number } | null,
     saleStatus?: 'Pagado' | 'Pendiente' | null,
     missingAmount?: number | null,
+    wrongRecipient?: string | null,
   ): Promise<string> {
     void history;
     const systemPrompt = [
@@ -183,16 +189,17 @@ export class AiService {
       focusProduct
         ? `🎯 PRODUCTO EN FOCO (el que el cliente estaba comprando): ${focusProduct.name} — Precio: ${focusProduct.price} Bs.`
         : '',
-      // La verdad del sistema manda: no se felicita si el pago quedó pendiente.
-      saleStatus === 'Pendiente'
-        ? `⚠️ RESULTADO VERIFICADO POR EL SISTEMA: el pago está INCOMPLETO. ${
-            missingAmount
-              ? `FALTAN ${missingAmount} Bs (el producto cuesta ${focusProduct?.price ?? 'más'}).`
-              : 'El monto del comprobante no fue legible.'
-          } Informa al cliente con amabilidad CUÁNTO FALTA y cómo completarlo. NO felicites como si el pedido estuviera confirmado y NO pidas datos de entrega todavía.`
-        : saleStatus === 'Pagado'
-          ? '✅ RESULTADO VERIFICADO POR EL SISTEMA: el pago CUBRE el precio. Confirma el pedido con alegría 🎉 y pide su NOMBRE COMPLETO y DIRECCIÓN de entrega para coordinar el envío.'
-          : '',
+      wrongRecipient
+        ? `🚨 RESULTADO VERIFICADO POR EL SISTEMA: el dinero fue enviado a UNA CUENTA DISTINTA A LA NUESTRA (destino: ${wrongRecipient}). Este pago NO es válido. Informa con amabilidad que la transferencia llegó a una cuenta equivocada y pídele pagar DE NUEVO a la cuenta correcta. NO felicites, NO pidas datos de entrega.`
+        : saleStatus === 'Pendiente'
+          ? `⚠️ RESULTADO VERIFICADO POR EL SISTEMA: el pago está INCOMPLETO. ${
+              missingAmount
+                ? `FALTAN ${missingAmount} Bs (el producto cuesta ${focusProduct?.price ?? 'más'}).`
+                : 'El monto no fue legible o no coincide con el catálogo.'
+            } Informa con amabilidad CUÁNTO FALTA y cómo completarlo. NO felicites y NO pidas datos de entrega todavía.`
+          : saleStatus === 'Pagado'
+            ? '✅ RESULTADO VERIFICADO POR EL SISTEMA: el pago CUBRE el precio. Confirma el pedido con alegría 🎉 y pide su NOMBRE COMPLETO y DIRECCIÓN de entrega.'
+            : '',
       ...(saleStatus
         ? [
             'Genera el mensaje para el cliente según el RESULTADO VERIFICADO (máximo 4 líneas, 1-2 emojis).',
@@ -341,6 +348,7 @@ export class AiService {
     isPaymentProof: boolean;
     amount: number | null;
     method: string | null;
+    recipient: string | null;
     rawAnalysis: string;
   }> {
     try {
@@ -385,6 +393,7 @@ Es false para: recargas de celular o paquetes de internet, compras en tiendas de
         isPaymentProof: boolean;
         amount: number | null;
         method: string | null;
+        recipient: string | null;
         rawAnalysis: string;
       };
     } catch (error: unknown) {
@@ -396,6 +405,7 @@ Es false para: recargas de celular o paquetes de internet, compras en tiendas de
         isPaymentProof: false,
         amount: null,
         method: null,
+        recipient: null,
         rawAnalysis: 'No se pudo analizar la imagen',
       };
     }

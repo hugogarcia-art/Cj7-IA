@@ -96,15 +96,25 @@ export class WhatsAppService {
       },
     });
 
+    // 🧠 PERFIL PERSISTENTE: lo que la IA ya sabe (no vuelve a pedirlo)
+    const clientProfile = [
+      `Nombre en CRM: ${client.name}`,
+      client.tags?.length ? `Etiquetas: ${client.tags.join(', ')}` : '',
+      client.status ? `Estado: ${client.status}` : '',
+      client.notes ? `Notas previas: ${client.notes}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
     await this.prisma.message.create({
       data: { phone, sender: 'user', content: text },
     });
 
-    // 🧠 NUEVO: memoria — últimos 10 mensajes de esta conversación
+    // 🧠 NUEVO: memoria — últimos 30 mensajes de esta conversación
     const recentMessages = await this.prisma.message.findMany({
       where: { phone },
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      take: 30,
     });
     const history = recentMessages
       .reverse()
@@ -160,6 +170,7 @@ export class WhatsAppService {
       history, // <-- NUEVO: la memoria
       productDescriptions,
       testimonialsForAi,
+      clientProfile, // <-- NUEVO
     );
 
     // 🖼️ NUEVO: si la IA pidió una foto de producto [IMG:nombre], la enviamos
@@ -210,43 +221,65 @@ export class WhatsAppService {
       return;
     }
 
-    // ⭐ Si el cliente pide TESTIMONIOS o pruebas sociales
+    // ⭐ Testimonios: hasta 3 evidencias (imagen o texto) — nunca filtra el tag
     const testimonialMatch = aiResponse.match(/\[TESTIMONIAL:([^\]]+)\]/i);
     if (testimonialMatch) {
       const requested = testimonialMatch[1].trim().toLowerCase();
-      const testimonial = testimonials.find(
-        (item) =>
-          item.title.toLowerCase().includes(requested) ||
-          (item.product?.name.toLowerCase() ?? '').includes(requested),
-      );
+      const words = requested.split(' ').filter((w) => w.length > 3);
 
-      if (testimonial) {
-        if (testimonial.imageUrl) {
-          await this.aiService.sendWhatsAppImage(
-            phone,
-            testimonial.imageUrl,
-            `⭐ ${testimonial.title}: ${testimonial.content}`,
-          );
-        } else {
-          await this.sendMessage(
-            phone,
-            `⭐ ${testimonial.title}\n\n${testimonial.content}`,
-          );
+      // Coincidencia suave por puntaje (título o producto)
+      const scored = testimonials
+        .map((item) => {
+          const haystack =`${item.title} ${item.product?.name ?? ''}`.toLowerCase();
+          const score =
+            (haystack.includes(requested) ? 10 : 0) +
+            words.filter((w) => haystack.includes(w)).length;
+          return { item, score };
+        })
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      // Si nada coincide, usa los primeros activos: SIEMPRE hay respuesta
+      const selected =
+        scored.length > 0
+          ? scored.slice(0, 3).map((entry) => entry.item)
+          : testimonials.slice(0, 3);
+
+      if (selected.length > 0) {
+        for (const testimonial of selected) {
+          const caption = `⭐ ${testimonial.title}: ${testimonial.content}${
+            testimonial.product ? ` (${testimonial.product.name})` : ''
+          }`;
+          if (testimonial.imageUrl) {
+            await this.aiService.sendWhatsAppImage(
+              phone,
+              testimonial.imageUrl,
+              caption,
+            );
+          } else {
+            await this.sendMessage(phone, caption);
+          }
         }
-
         await this.prisma.message.create({
           data: {
             phone,
             sender: 'ai',
-            content: `[Testimonio: ${testimonial.title}] ${testimonial.content}`,
+            content: `[Testimonios enviados: ${selected
+              .map((t) => t.title)
+              .join(' | ')}]`,
           },
         });
-
-        this.logger.log(
-          `⭐ Testimonio "${testimonial.title}" enviado a ${phone}`,
-        );
         return;
       }
+
+      // Sin testimonios cargados: honesto, sin filtrar el tag
+      const noTestimonials =
+        'Me encantaría mostrarte testimonios 😊 Ahora mismo no tengo evidencias cargadas, pero con gusto te mando una foto del producto o respondo tus dudas. ¿Qué prefieres?';
+      await this.sendMessage(phone, noTestimonials);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: noTestimonials },
+      });
+      return;
     }
 
     // 🏷️ Procesar tags especiales ANTES de enviar al cliente
@@ -478,7 +511,7 @@ export class WhatsAppService {
     const recentMessages = await this.prisma.message.findMany({
       where: { phone },
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      take: 30,
     });
     const history = recentMessages.reverse().map((message) => ({
       sender: message.sender,
@@ -487,7 +520,7 @@ export class WhatsAppService {
 
     const catalog = await this.prisma.product.findMany({
       where: { userId: ownerId, status: 'Activo' },
-      take: 10,
+      take: 30,
       select: { name: true, price: true, offerPrice: true, stock: true },
     });
 
@@ -514,6 +547,9 @@ export class WhatsAppService {
         focusProduct,
         analysis.saleStatus ?? null,
         analysis.missingAmount ?? null,
+        analysis.wrongAccount
+          ? (analysis.recipient ?? 'una cuenta diferente')
+          : null,
       );
 
       await this.sendMessage(phone, confirmation);
