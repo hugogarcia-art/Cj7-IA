@@ -118,6 +118,7 @@ export class WhatsAppService {
       select: {
         name: true,
         price: true,
+        offerPrice: true,
         stock: true,
         imageUrl: true,
         extraImages: true,
@@ -331,24 +332,44 @@ export class WhatsAppService {
       data: { phone, sender: 'ai', content: responseToSend },
     });
   }
-  // 🎯 Detecta el producto del que se estaba hablando en el historial
-  // 🎯 Detecta el producto del que se hablaba: el más específico gana
+  // 🎯 Detecta el producto en foco: prioriza el ÚLTIMO mensaje del CLIENTE
   private detectFocusProduct(
     history: Array<{ sender: string; content: string }>,
-    products: Array<{ name: string; price: number }>,
+    products: Array<{
+      name: string;
+      price: number;
+      offerPrice?: number | null;
+    }>,
   ): { name: string; price: number } | null {
-    // 1. Coincidencia exacta del nombre completo (más confiable)
+    const effectivePrice = (p: {
+      price: number;
+      offerPrice?: number | null;
+    }) => (p.offerPrice && p.offerPrice < p.price ? p.offerPrice : p.price);
+
+    // 1. Del mensaje del CLIENTE más reciente hacia atrás: el primero que
+    //    mencione un producto gana (es el que está comprando ahora).
     for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].sender !== 'user') continue;
       const content = history[i].content.toLowerCase();
-      const exact = products.find((p) =>
-        content.includes(p.name.toLowerCase()),
-      );
-      if (exact) return exact;
+
+      const full = products.find((p) => content.includes(p.name.toLowerCase()));
+      if (full) return { name: full.name, price: effectivePrice(full) };
+
+      // Palabra clave: la PRIMERA del nombre distingue productos de la misma
+      // línea (Biokits Moringa vs Xol Moringa).
+      const byKeyword = products.find((p) => {
+        const first = p.name.toLowerCase().split(' ')[0];
+        return first.length > 3 && content.includes(first);
+      });
+      if (byKeyword) {
+        return {
+          name: byKeyword.name,
+          price: effectivePrice(byKeyword),
+        };
+      }
     }
 
-    // 2. Por puntaje: el producto con MÁS palabras coincidentes
-    //    (así "Biokits Moringa" le gana a "Xol Moringa" cuando
-    //     ambas comparten "moringa")
+    // 2. Respaldo: puntaje en todo el historial
     let best: { product: (typeof products)[0]; score: number } | null = null;
     for (const product of products) {
       const words = product.name
@@ -357,13 +378,14 @@ export class WhatsAppService {
         .filter((word) => word.length > 3);
       let score = 0;
       for (const message of history) {
-        for (const word of words) {
-          if (message.content.toLowerCase().includes(word)) score++;
-        }
+        const content = message.content.toLowerCase();
+        for (const word of words) if (content.includes(word)) score++;
       }
       if (score > (best?.score ?? 0)) best = { product, score };
     }
-    return best?.product ?? null;
+    return best?.product
+      ? { name: best.product.name, price: effectivePrice(best.product) }
+      : null;
   }
   // 🔔 Notifica al dueño por WhatsApp (requiere OWNER_NOTIFY_PHONE en .env)
   private async notifyOwner(message: string): Promise<void> {
@@ -444,7 +466,7 @@ export class WhatsAppService {
     const catalog = await this.prisma.product.findMany({
       where: { userId: ownerId, status: 'Activo' },
       take: 10,
-      select: { name: true, price: true, stock: true },
+      select: { name: true, price: true, offerPrice: true, stock: true },
     });
 
     // 🎯 Producto en foco: del que hablaban antes del pago
@@ -457,6 +479,7 @@ export class WhatsAppService {
       phone,
       buffer,
       focusProduct?.price ?? null,
+      catalog.map((p) => p.offerPrice ?? p.price),
     );
 
     if (analysis.isPaymentProof) {

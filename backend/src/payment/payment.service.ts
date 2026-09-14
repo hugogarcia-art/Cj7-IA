@@ -36,6 +36,7 @@ export class PaymentVisionService {
     clientPhone: string,
     imageBuffer: Buffer,
     expectedAmount?: number | null,
+    catalogPrices: number[] = [],
   ): Promise<VisionResult> {
     const base64Image = imageBuffer.toString('base64');
 
@@ -45,7 +46,9 @@ export class PaymentVisionService {
     const expected =
       typeof expectedAmount === 'number' && expectedAmount > 0
         ? expectedAmount
-        : null;
+        : catalogPrices.length === 1 && catalogPrices[0] > 0
+          ? catalogPrices[0]
+          : null;
 
     // 2. El cliente SIEMPRE existe antes de crear la venta (antes se usaba
     // el id del User como clientId y rompía la clave foránea)
@@ -92,9 +95,17 @@ export class PaymentVisionService {
         status = 'Pendiente';
         missingAmount = Math.round((expected - received) * 100) / 100;
       }
-    } else if (received !== null && received > 0) {
-      // Sin precio en foco conocido: se registra Pagado y el dueño revisa
+    } else if (
+      received !== null &&
+      received > 0 &&
+      catalogPrices.includes(received)
+    ) {
+      // Sin producto en foco, pero el monto coincide EXACTO con un precio del catálogo
       status = 'Pagado';
+    } else if (received !== null && received > 0) {
+      // Monto legible pero no coincide con nada ni hay foco: revisión manual
+      status = 'Pendiente';
+      missingAmount = null;
     } else {
       // Monto ilegible: nunca marcar Pagado a ciegas
       status = 'Pendiente';
@@ -188,7 +199,7 @@ export class PaymentVisionService {
         `Recibió: ${received} Bs\n` +
         (params.expectedAmount
           ? `Precio esperado: ${params.expectedAmount} Bs\nFALTAN: ${params.missingAmount} Bs\n`
-          : `Monto del comprobante ilegible — revisa manualmente\n`) +
+          : `Monto no coincide con ningún producto del catálogo (o ilegible) — revisa manualmente\n`) +
         `Método: ${method}\n` +
         (saleId
           ? `Venta #${saleId.slice(0, 8)} quedó como PENDIENTE en el Pipeline.`
