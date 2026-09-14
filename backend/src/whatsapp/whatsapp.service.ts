@@ -255,9 +255,15 @@ export class WhatsAppService {
     if (/\[PAGO\]/i.test(responseToSend)) {
       responseToSend = responseToSend.replace(/\[PAGO\]/gi, '').trim();
       const paymentInfo = process.env.PAYMENT_INFO?.trim();
-      responseToSend = paymentInfo
-        ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}`
+      const paymentMessage = paymentInfo
+        ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}\n\nCuéntame por cuál medio pagas y quedo atenta/o a tu comprobante 😊`
         : 'Con gusto 😊 Un asesor te enviará los datos de pago en unos minutos.';
+
+      await this.sendMessage(phone, paymentMessage);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: paymentMessage },
+      });
+      return;
     }
 
     // [ASESOR]: derivar a asesor humano + notificar al dueño
