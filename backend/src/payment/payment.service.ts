@@ -15,6 +15,7 @@ type VisionResult = {
   missingAmount?: number | null;
   /** ID de la venta creada, si corresponde. */
   saleId?: string | null;
+  recipient?: string | null;
 };
 
 @Injectable()
@@ -162,6 +163,7 @@ export class PaymentVisionService {
     status: 'Pagado' | 'Pendiente' | null;
     expectedAmount: number | null;
     missingAmount: number | null;
+    recipient?: string | null;
   }): Promise<void> {
     const phoneNumberId = process.env.PHONE_NUMBER_ID;
     const metaToken = process.env.META_TOKEN;
@@ -201,6 +203,7 @@ export class PaymentVisionService {
           ? `Precio esperado: ${params.expectedAmount} Bs\nFALTAN: ${params.missingAmount} Bs\n`
           : `Monto no coincide con ningún producto del catálogo (o ilegible) — revisa manualmente\n`) +
         `Método: ${method}\n` +
+        `Destino del dinero: ${analysis.recipient ?? 'N/D'}\n` +
         (saleId
           ? `Venta #${saleId.slice(0, 8)} quedó como PENDIENTE en el Pipeline.`
           : '');

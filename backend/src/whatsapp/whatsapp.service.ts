@@ -251,6 +251,14 @@ export class WhatsAppService {
 
     // 🏷️ Procesar tags especiales ANTES de enviar al cliente
     let responseToSend = aiResponse;
+    // 💳 [PAGO]: los datos de pago SIEMPRE vienen del entorno, jamás de la IA
+    if (/\[PAGO\]/i.test(responseToSend)) {
+      responseToSend = responseToSend.replace(/\[PAGO\]/gi, '').trim();
+      const paymentInfo = process.env.PAYMENT_INFO?.trim();
+      responseToSend = paymentInfo
+        ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}`
+        : 'Con gusto 😊 Un asesor te enviará los datos de pago en unos minutos.';
+    }
 
     // [ASESOR]: derivar a asesor humano + notificar al dueño
     if (/\[ASESOR\]/i.test(responseToSend)) {
