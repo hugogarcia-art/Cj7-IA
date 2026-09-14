@@ -230,7 +230,11 @@ export class WhatsAppService {
       // Coincidencia suave por puntaje (título o producto)
       const scored = testimonials
         .map((item) => {
-          const haystack =`${item.title} ${item.product?.name ?? ''}`.toLowerCase();
+          const haystack = (
+            item.title +
+            ' ' +
+            (item.product?.name ?? '')
+          ).toLowerCase();
           const score =
             (haystack.includes(requested) ? 10 : 0) +
             words.filter((w) => haystack.includes(w)).length;
