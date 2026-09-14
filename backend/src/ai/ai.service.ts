@@ -94,6 +94,7 @@ export class AiService {
       '  • "¿Prefieres el paquete individual o el pack familiar?"',
       '  • "¿Para uso diario o para una ocasión especial?"',
       '- Un mensaje = máximo 2 preguntas. No interrogues: conversa.',
+      '- REGLA DE ORO DE LA FOTO: cuando el cliente muestre interés en un producto ("me interesa X", "quiero X", "cuéntame de X"), tu respuesta SIEMPRE incluye: beneficios breves conectados a su necesidad + UNA pregunta de alternativa doble + el tag [IMG:nombre exacto del producto] al final. Así el cliente ve la foto SIN pedirla.',
       '',
       'ETAPA 2 — RECOMENDACIÓN PERSONALIZADA:',
       '- Con sus respuestas, presenta el producto CONECTANDO con SU necesidad ("como me contaste que es para tu peque de 5, esta opción es ideal porque...").',
@@ -102,7 +103,8 @@ export class AiService {
       '',
       'ETAPA 3 — OBJECIONES Y CONFIANZA:',
       '- Si duda o pregunta "¿funciona?": menciona UNO de los TESTIMONIOS REALES y ofrece evidencia con el tag [TESTIMONIAL:tema].',
-      '- Si pide FOTO: tag [IMG:nombre exacto del producto].',
+      '- Evidencia según lo que pida el cliente: FOTO del producto → [IMG:nombre]. VIDEO o demostración → [VIDEO:nombre]. RESULTADOS, testimonios, "antes y después", "¿funciona?" → [TESTIMONIAL:nombre del producto] (el sistema enviará hasta 3 evidencias con fotos).',
+      '- En productos para bajar de peso, los ANTES/DESPUÉS son oro: cuando pregunten por resultados, USA el tag [TESTIMONIAL:...] sin dudarlo.',
       '- Si pide un humano: tag exacto [ASESOR] y nada más.',
       '',
       'ETAPA 4 — CIERRE (solo con confirmación EXPLÍCITA de compra):',
@@ -111,7 +113,7 @@ export class AiService {
       '- NUNCA inventes datos bancarios, cuentas, CCI ni titulares: esos datos NO te los doy.',
       '',
       'ETAPA 5 — ENTREGA (después del pago o al elegir contraentrega):',
-      '- Pide UNA cosa a la vez: NOMBRE COMPLETO → DIRECCIÓN Y CIUDAD → HORA que le venga cómoda para recibir ("¿te viene bien en la mañana de 9 a 12, o prefieres por la tarde?").',
+      '- Pide UNA cosa a la vez y UNA sola vez: NOMBRE COMPLETO → DIRECCIÓN Y CIUDAD → HORA ("¿te viene bien en la mañana de 9 a 12, o prefieres por la tarde?"). Si el cliente ya te lo dijo antes en la conversación, NO lo vuelvas a pedir: úsalo.',
       '- Cuando el cliente dé su nombre y/o dirección y/o hora, agradece y responde ÚNICAMENTE el tag: [DATOS:nombre completo|dirección y ciudad|hora preferida]. Si falta un dato usa N/D. Ejemplo: [DATOS:Maria Perez Gomez|Av. Siempre Viva 123, La Paz|mañana 9 a 12].',
       '',
       '📏 REGLAS DE ORO:',
@@ -343,6 +345,38 @@ export class AiService {
 
     return true;
   }
+
+  // Envía un VIDEO por WhatsApp (demostraciones de producto)
+  async sendWhatsAppVideo(
+    to: string,
+    videoUrl: string,
+    caption: string,
+  ): Promise<boolean> {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.META_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to,
+          type: 'video',
+          video: { link: videoUrl, caption },
+        }),
+      },
+    );
+    if (!response.ok) {
+      console.error(
+        `❌ Meta rechazó el video para ${to}: HTTP ${response.status}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
   // 💳 Analiza un comprobante de pago con GPT-4o Vision
   async analyzePaymentProof(base64Image: string): Promise<{
     isPaymentProof: boolean;

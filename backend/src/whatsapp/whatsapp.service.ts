@@ -8,6 +8,8 @@ import { PaymentVisionService } from '../payment/payment.service';
 const GRAPH_VERSION = 'v20.0';
 const IMAGE_TAG_PATTERN = /\[IMG:([^\]]+)\]/i;
 const IMAGE_TAG_GLOBAL_PATTERN = /\[IMG:[^\]]+\]/gi;
+const VIDEO_TAG_PATTERN = /\[VIDEO:([^\]]+)\]/i;
+const VIDEO_TAG_GLOBAL_PATTERN = /\[VIDEO:[^\]]+\]/gi;
 
 @Injectable()
 export class WhatsAppService {
@@ -131,6 +133,7 @@ export class WhatsAppService {
         offerPrice: true,
         stock: true,
         imageUrl: true,
+        videoUrl: true,
         extraImages: true,
         description: true,
       },
@@ -221,6 +224,40 @@ export class WhatsAppService {
       return;
     }
 
+    // 🎥 [VIDEO:producto] — demostraciones y resultados en video
+    const videoMatch = aiResponse.match(VIDEO_TAG_PATTERN);
+    if (videoMatch) {
+      const requested = videoMatch[1].trim().toLowerCase();
+      const product = products.find(
+        (p) =>
+          p.name.toLowerCase().includes(requested) ||
+          requested.includes(p.name.toLowerCase().split(' ')[0]),
+      );
+
+      const caption = aiResponse.replace(VIDEO_TAG_GLOBAL_PATTERN, '').trim();
+
+      const videoUrl = (product as { videoUrl?: string | null } | undefined)
+        ?.videoUrl;
+      if (typeof videoUrl === 'string' && videoUrl.length > 0) {
+        await this.aiService.sendWhatsAppVideo(
+          phone,
+          videoUrl,
+          caption || `🎥 ${product.name}`,
+        );
+        await this.prisma.message.create({
+          data: { phone, sender: 'ai', content: `[Video: ${product.name}]` },
+        });
+        return;
+      }
+
+      // Sin video cargado: responde el texto sin el tag
+      await this.sendMessage(phone, caption);
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: caption },
+      });
+      return;
+    }
+
     // ⭐ Testimonios: hasta 3 evidencias (imagen o texto) — nunca filtra el tag
     const testimonialMatch = aiResponse.match(/\[TESTIMONIAL:([^\]]+)\]/i);
     if (testimonialMatch) {
@@ -295,6 +332,16 @@ export class WhatsAppService {
       const paymentMessage = paymentInfo
         ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}\n\nCuéntame por cuál medio pagas y quedo atenta/o a tu comprobante 😊`
         : 'Con gusto 😊 Un asesor te enviará los datos de pago en unos minutos.';
+
+      // 📷 Si existe QR de pago, envíalo primero
+      const qrUrl = process.env.PAYMENT_QR_URL?.trim();
+      if (qrUrl) {
+        await this.aiService.sendWhatsAppImage(
+          phone,
+          qrUrl,
+          '📷 Este es nuestro QR — escanéalo para pagar',
+        );
+      }
 
       await this.sendMessage(phone, paymentMessage);
       await this.prisma.message.create({
@@ -525,7 +572,13 @@ export class WhatsAppService {
     const catalog = await this.prisma.product.findMany({
       where: { userId: ownerId, status: 'Activo' },
       take: 30,
-      select: { name: true, price: true, offerPrice: true, stock: true },
+      select: {
+        name: true,
+        price: true,
+        offerPrice: true,
+        stock: true,
+        videoUrl: true,
+      },
     });
 
     // 🎯 Producto en foco: del que hablaban antes del pago

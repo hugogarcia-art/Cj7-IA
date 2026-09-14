@@ -38,6 +38,7 @@ export class ProductService {
     data: CreateProductDto,
     file: UploadedImage | undefined,
     extraFiles: UploadedImage[] = [],
+    video?: { buffer: Buffer; mimetype: string },
   ) {
     const price = toFloat(data.price);
     if (price === null || price < 0) {
@@ -46,6 +47,12 @@ export class ProductService {
 
     const imageUrl = file
       ? await this.storageService.uploadImage(file, userId)
+      : undefined;
+    const videoUrl = video
+      ? await this.storageService.uploadVideo(
+          video,
+          `${userId}/video-${Date.now()}`,
+        )
       : undefined;
     const extraImages: string[] = [];
     for (const [index, extra] of extraFiles.entries()) {
@@ -74,6 +81,7 @@ export class ProductService {
           stock: toInt(data.stock) ?? 0,
           minStock: toInt(data.minStock) ?? 0,
           imageUrl,
+          videoUrl,
           extraImages,
           status: data.status ?? 'Activo',
           userId,
@@ -93,6 +101,7 @@ export class ProductService {
     data: UpdateProductDto,
     file: UploadedImage | undefined,
     extraFiles: UploadedImage[] = [],
+    video?: { buffer: Buffer; mimetype: string },
   ) {
     const existing = await this.prisma.product.findFirst({
       where: { id, userId },
@@ -110,6 +119,12 @@ export class ProductService {
     // Solo reemplazamos la imagen si suben una nueva; si no, se conserva.
     const imageUrl = file
       ? await this.storageService.uploadImage(file, userId)
+      : undefined;
+    const videoUrl = video
+      ? await this.storageService.uploadVideo(
+          video,
+          `${userId}/video-${Date.now()}`,
+        )
       : undefined;
     const extraImages: string[] = [];
     for (const [index, extra] of extraFiles.entries()) {
@@ -146,6 +161,7 @@ export class ProductService {
               ? (toInt(data.minStock) ?? 0)
               : undefined,
           imageUrl,
+          ...(videoUrl ? { videoUrl } : {}),
           ...(extraImages.length > 0
             ? { extraImages: { push: extraImages } }
             : {}),

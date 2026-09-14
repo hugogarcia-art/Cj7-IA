@@ -1,15 +1,22 @@
+import sharp from 'sharp';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 import { optionalEnv } from '../common/env';
 import { describeError } from '../common/errors';
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+export const MAX_VIDEO_BYTES = 16 * 1024 * 1024; // 16 MB (límite de Meta)
 
 const ALLOWED_MIME_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
   'image/gif': 'gif',
+};
+
+const ALLOWED_VIDEO_TYPES: Record<string, string> = {
+  'video/mp4': 'mp4',
+  'video/3gpp': '3gp',
 };
 
 export type UploadedImage = {
@@ -77,7 +84,6 @@ export class StorageService {
     fileName: string,
   ): Promise<string> {
     // Convierte SIEMPRE a JPG (Meta no acepta WEBP en la API)
-    const sharp = (await import('sharp')).default;
     const jpgBuffer = await sharp(file.buffer).jpeg({ quality: 90 }).toBuffer();
 
     const supabase = this.getClient();
@@ -89,6 +95,28 @@ export class StorageService {
 
     return supabase.storage.from(this.bucket).getPublicUrl(fileName).data
       .publicUrl;
+  }
+
+  /** Sube un VIDEO (sin conversión — Meta acepta mp4 directo). */
+  async uploadVideo(
+    file: { buffer: Buffer; mimetype: string },
+    fileName: string,
+  ): Promise<string> {
+    if (!ALLOWED_VIDEO_TYPES[file.mimetype]) {
+      throw new BadRequestException(
+        'Solo se permiten videos MP4 o 3GP (máx. 16 MB).',
+      );
+    }
+    const supabase = this.getClient();
+    const ext = ALLOWED_VIDEO_TYPES[file.mimetype];
+    const { error } = await supabase.storage
+      .from(this.bucket)
+      .upload(`${fileName}.${ext}`, file.buffer, {
+        contentType: file.mimetype,
+      });
+    if (error) throw error;
+    return supabase.storage.from(this.bucket).getPublicUrl(`${fileName}.${ext}`)
+      .data.publicUrl;
   }
 
   /**

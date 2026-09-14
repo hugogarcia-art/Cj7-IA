@@ -74,6 +74,7 @@ model Product {
   stock       Int      @default(0)
   minStock    Int      @default(0)
   imageUrl    String?
+  videoUrl    String?
   extraImages String[]
   testimonials Testimonial[]
   status      String   @default("Activo")

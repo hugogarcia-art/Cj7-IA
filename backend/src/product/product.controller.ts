@@ -18,7 +18,7 @@ import {
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
 import {
-  MAX_IMAGE_BYTES,
+  MAX_VIDEO_BYTES,
   type UploadedImage,
 } from '../storage/storage.service';
 
@@ -27,9 +27,10 @@ const imageUpload = FileFieldsInterceptor(
   [
     { name: 'file', maxCount: 1 },
     { name: 'extraImages', maxCount: 5 },
+    { name: 'video', maxCount: 1 },
   ],
   {
-    limits: { fileSize: MAX_IMAGE_BYTES, files: 6 },
+    limits: { fileSize: MAX_VIDEO_BYTES, files: 7 },
   },
 );
 
@@ -51,6 +52,7 @@ export class ProductController {
     files: {
       file?: UploadedImage[];
       extraImages?: UploadedImage[];
+      video?: UploadedImage[];
     },
   ) {
     return this.productService.createProduct(
@@ -58,6 +60,7 @@ export class ProductController {
       body,
       files.file?.[0],
       files.extraImages,
+      files.video?.[0],
     );
   }
 
@@ -71,6 +74,7 @@ export class ProductController {
     files: {
       file?: UploadedImage[];
       extraImages?: UploadedImage[];
+      video?: UploadedImage[];
     },
   ) {
     return this.productService.updateProduct(
@@ -79,6 +83,7 @@ export class ProductController {
       body,
       files.file?.[0],
       files.extraImages,
+      files.video?.[0],
     );
   }
 
