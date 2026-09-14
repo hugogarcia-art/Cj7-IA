@@ -1,3 +1,4 @@
+import { TestimonialModule } from './testimonial/testimonial.module';
 import { SaleModule } from './sale/sale.module';
 import { AutomationModule } from './automation/automation.module';
 import { CampaignModule } from './campaign/campaign.module';
@@ -36,6 +37,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     AutomationModule,
     SaleModule,
     PaymentModule,
+    TestimonialModule,
     //QueueModule,
   ],
   controllers: [AppController],

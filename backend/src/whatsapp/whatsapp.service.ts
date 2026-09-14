@@ -29,8 +29,14 @@ export class WhatsAppService {
   ): boolean {
     const appSecret = optionalEnv('META_APP_SECRET');
     if (!appSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        this.logger.error(
+          'META_APP_SECRET falta en producción: webhook RECHAZADO por seguridad.',
+        );
+        return false;
+      }
       this.logger.warn(
-        'META_APP_SECRET no está configurado: el webhook acepta cualquier petición.',
+        'META_APP_SECRET sin configurar (solo desarrollo): se acepta la petición.',
       );
       return true;
     }
@@ -112,12 +118,36 @@ export class WhatsAppService {
       select: {
         name: true,
         price: true,
+        offerPrice: true,
         stock: true,
         imageUrl: true,
         extraImages: true,
         description: true,
       },
     });
+
+    // ⭐ Testimonios activos (prueba social para la IA)
+    const testimonials = await this.prisma.testimonial.findMany({
+      where: { userId: ownerId, active: true },
+      take: 5,
+      select: {
+        title: true,
+        content: true,
+        imageUrl: true,
+        product: { select: { name: true } },
+      },
+    });
+
+    const testimonialsForAi =
+      testimonials.length > 0
+        ? `⭐ TESTIMONIOS REALES DE CLIENTES (úsalos como prueba social cuando el cliente dude):\n${testimonials
+            .map(
+              (testimonial) =>
+                `- "${testimonial.content}" — ${testimonial.title}${testimonial.product ? ` (${testimonial.product.name})` : ''}`,
+            )
+            .join('\n')}`
+        : '';
+
     const productDescriptions = products
       .filter((product) => product.description?.trim())
       .map((product) => `- ${product.name}: ${product.description}`)
@@ -129,6 +159,7 @@ export class WhatsAppService {
       AiService.formatInventory(products),
       history, // <-- NUEVO: la memoria
       productDescriptions,
+      testimonialsForAi,
     );
 
     // 🖼️ NUEVO: si la IA pidió una foto de producto [IMG:nombre], la enviamos
@@ -179,8 +210,55 @@ export class WhatsAppService {
       return;
     }
 
+    // ⭐ Si el cliente pide TESTIMONIOS o pruebas sociales
+    const testimonialMatch = aiResponse.match(/\[TESTIMONIAL:([^\]]+)\]/i);
+    if (testimonialMatch) {
+      const requested = testimonialMatch[1].trim().toLowerCase();
+      const testimonial = testimonials.find(
+        (item) =>
+          item.title.toLowerCase().includes(requested) ||
+          (item.product?.name.toLowerCase() ?? '').includes(requested),
+      );
+
+      if (testimonial) {
+        if (testimonial.imageUrl) {
+          await this.aiService.sendWhatsAppImage(
+            phone,
+            testimonial.imageUrl,
+            `⭐ ${testimonial.title}: ${testimonial.content}`,
+          );
+        } else {
+          await this.sendMessage(
+            phone,
+            `⭐ ${testimonial.title}\n\n${testimonial.content}`,
+          );
+        }
+
+        await this.prisma.message.create({
+          data: {
+            phone,
+            sender: 'ai',
+            content: `[Testimonio: ${testimonial.title}] ${testimonial.content}`,
+          },
+        });
+
+        this.logger.log(
+          `⭐ Testimonio "${testimonial.title}" enviado a ${phone}`,
+        );
+        return;
+      }
+    }
+
     // 🏷️ Procesar tags especiales ANTES de enviar al cliente
     let responseToSend = aiResponse;
+    // 💳 [PAGO]: los datos de pago SIEMPRE vienen del entorno, jamás de la IA
+    if (/\[PAGO\]/i.test(responseToSend)) {
+      responseToSend = responseToSend.replace(/\[PAGO\]/gi, '').trim();
+      const paymentInfo = process.env.PAYMENT_INFO?.trim();
+      responseToSend = paymentInfo
+        ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}`
+        : 'Con gusto 😊 Un asesor te enviará los datos de pago en unos minutos.';
+    }
 
     // [ASESOR]: derivar a asesor humano + notificar al dueño
     if (/\[ASESOR\]/i.test(responseToSend)) {
@@ -262,24 +340,60 @@ export class WhatsAppService {
       data: { phone, sender: 'ai', content: responseToSend },
     });
   }
-  // 🎯 Detecta el producto del que se estaba hablando en el historial
+  // 🎯 Detecta el producto en foco: prioriza el ÚLTIMO mensaje del CLIENTE
   private detectFocusProduct(
     history: Array<{ sender: string; content: string }>,
-    products: Array<{ name: string; price: number }>,
+    products: Array<{
+      name: string;
+      price: number;
+      offerPrice?: number | null;
+    }>,
   ): { name: string; price: number } | null {
+    const effectivePrice = (p: {
+      price: number;
+      offerPrice?: number | null;
+    }) => (p.offerPrice && p.offerPrice < p.price ? p.offerPrice : p.price);
+
+    // 1. Del mensaje del CLIENTE más reciente hacia atrás: el primero que
+    //    mencione un producto gana (es el que está comprando ahora).
     for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].sender !== 'user') continue;
       const content = history[i].content.toLowerCase();
-      for (const product of products) {
-        const words = product.name
-          .toLowerCase()
-          .split(' ')
-          .filter((word) => word.length > 3);
-        if (words.some((word) => content.includes(word))) {
-          return product;
-        }
+
+      const full = products.find((p) => content.includes(p.name.toLowerCase()));
+      if (full) return { name: full.name, price: effectivePrice(full) };
+
+      // Palabra clave: la PRIMERA del nombre distingue productos de la misma
+      // línea (Biokits Moringa vs Xol Moringa).
+      const byKeyword = products.find((p) => {
+        const first = p.name.toLowerCase().split(' ')[0];
+        return first.length > 3 && content.includes(first);
+      });
+      if (byKeyword) {
+        return {
+          name: byKeyword.name,
+          price: effectivePrice(byKeyword),
+        };
       }
     }
-    return null;
+
+    // 2. Respaldo: puntaje en todo el historial
+    let best: { product: (typeof products)[0]; score: number } | null = null;
+    for (const product of products) {
+      const words = product.name
+        .toLowerCase()
+        .split(' ')
+        .filter((word) => word.length > 3);
+      let score = 0;
+      for (const message of history) {
+        const content = message.content.toLowerCase();
+        for (const word of words) if (content.includes(word)) score++;
+      }
+      if (score > (best?.score ?? 0)) best = { product, score };
+    }
+    return best?.product
+      ? { name: best.product.name, price: effectivePrice(best.product) }
+      : null;
   }
   // 🔔 Notifica al dueño por WhatsApp (requiere OWNER_NOTIFY_PHONE en .env)
   private async notifyOwner(message: string): Promise<void> {
@@ -345,41 +459,47 @@ export class WhatsAppService {
       return;
     }
 
-    // Analiza con Vision AI y registra la venta si es válida.
+    // ── ANTES de analizar: carga memoria + catálogo y detecta el producto
+    // en foco. Necesitamos su precio ANTES de registrar la venta.
+    const recentMessages = await this.prisma.message.findMany({
+      where: { phone },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    const history = recentMessages.reverse().map((message) => ({
+      sender: message.sender,
+      content: message.content,
+    }));
+
+    const catalog = await this.prisma.product.findMany({
+      where: { userId: ownerId, status: 'Activo' },
+      take: 10,
+      select: { name: true, price: true, offerPrice: true, stock: true },
+    });
+
+    // 🎯 Producto en foco: del que hablaban antes del pago
+    const focusProduct = this.detectFocusProduct(history, catalog);
+
+    // Analiza con Vision AI y registra la venta COMPARANDO contra el precio real
     const analysis = await this.paymentVision.processPaymentProof(
       ownerId,
       client.name,
       phone,
       buffer,
+      focusProduct?.price ?? null,
+      catalog.map((p) => p.offerPrice ?? p.price),
     );
 
     if (analysis.isPaymentProof) {
-      // ✅ Confirmación al CLIENTE (con memoria de la conversación)
-      const recentMessages = await this.prisma.message.findMany({
-        where: { phone },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      });
-      const history = recentMessages.reverse().map((message) => ({
-        sender: message.sender,
-        content: message.content,
-      }));
-
-      const catalog = await this.prisma.product.findMany({
-        where: { userId: ownerId, status: 'Activo' },
-        take: 10,
-        select: { name: true, price: true, stock: true },
-      });
-
-      // 🎯 Detecta el producto en foco (del que hablaban antes del pago)
-      const focusProduct = this.detectFocusProduct(history, catalog);
-
+      // ✅ Confirmación al CLIENTE (la IA ya sabe si fue completo o parcial)
       const confirmation = await this.aiService.generatePaymentConfirmation(
         analysis.amount,
         AiService.formatInventory(catalog),
         client.name,
         history,
         focusProduct,
+        analysis.saleStatus ?? null,
+        analysis.missingAmount ?? null,
       );
 
       await this.sendMessage(phone, confirmation);
@@ -387,7 +507,7 @@ export class WhatsAppService {
         data: { phone, sender: 'ai', content: confirmation },
       });
       this.logger.log(
-        `💳 Pago verificado de ${analysis.amount ?? '?'} Bs a ${phone} — confirmación enviada`,
+        `💳 Pago de ${analysis.amount ?? '?'} Bs de ${phone} — comprobante verificado y confirmación enviada`,
       );
     } else {
       const msg =
@@ -397,6 +517,51 @@ export class WhatsAppService {
         data: { phone, sender: 'ai', content: msg },
       });
     }
+  }
+  // 📍 Guarda la ubicación del cliente como dirección de entrega
+  async handleIncomingLocation(
+    phone: string,
+    latitude: number,
+    longitude: number,
+  ): Promise<void> {
+    const ownerId = await this.resolveOwnerId();
+    if (!ownerId) return;
+
+    const client = await this.prisma.client.upsert({
+      where: { userId_phone: { userId: ownerId, phone } },
+      update: { lastContact: new Date() },
+      create: {
+        name: `Cliente WhatsApp ${phone}`,
+        phone,
+        userId: ownerId,
+      },
+    });
+
+    const mapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
+
+    await this.prisma.client.update({
+      where: { id: client.id },
+      data: {
+        notes: `📍 Ubicación de entrega: ${mapsLink} (lat: ${latitude}, lng: ${longitude})`,
+      },
+    });
+
+    await this.prisma.message.create({
+      data: {
+        phone,
+        sender: 'user',
+        content: `[Ubicación de entrega: ${mapsLink}]`,
+      },
+    });
+
+    await this.sendMessage(
+      phone,
+      '¡Perfecto! 📍 Tu ubicación quedó registrada para la entrega. 🚚✨',
+    );
+
+    await this.notifyOwner(
+      `📍 UBICACIÓN DE ENTREGA recibida:\nCliente: ${client.name} (${phone})\nVer en el mapa: ${mapsLink}\n\nCoordina la entrega 🚚`,
+    );
   }
 
   private async sendMessage(phone: string, body: string): Promise<void> {

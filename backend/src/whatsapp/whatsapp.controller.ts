@@ -24,6 +24,7 @@ type WhatsAppWebhookBody = {
           type?: string;
           text?: { body?: string };
           image?: { id?: string };
+          location?: { latitude: number; longitude: number };
         }[];
       };
     }[];
@@ -86,6 +87,21 @@ export class WhatsAppController {
       } catch (error: unknown) {
         this.logger.error(
           `Error procesando imagen de ${phone}: ${describeError(error)}`,
+        );
+      }
+      return;
+    }
+    // 📍 Si el cliente envió su UBICACIÓN (pin de WhatsApp):
+    if (message.type === 'location' && message.location) {
+      try {
+        await this.whatsappService.handleIncomingLocation(
+          phone,
+          message.location.latitude,
+          message.location.longitude,
+        );
+      } catch (error: unknown) {
+        this.logger.error(
+          `Error procesando ubicación de ${phone}: ${describeError(error)}`,
         );
       }
       return;
