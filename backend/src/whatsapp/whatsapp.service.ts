@@ -306,17 +306,23 @@ export class WhatsAppService {
       });
       return;
     }
-    // 📦 [DATOS]: el cliente envió su nombre completo y/o dirección de entrega
+    // 📦 [DATOS]: nombre completo + dirección/ciudad + hora preferida de entrega
     const datosMatch = responseToSend.match(/\[DATOS:([^\]]+)\]/i);
     if (datosMatch) {
-      const [fullName, address] = datosMatch[1]
+      const [fullName, address, deliveryTime] = datosMatch[1]
         .split('|')
         .map((part) => part.trim());
 
       const updateData: { name?: string; notes?: string } = {};
       if (fullName && fullName !== 'N/D') updateData.name = fullName;
-      if (address && address !== 'N/D') {
-        updateData.notes = `📍 Dirección de entrega: ${address}`;
+
+      const noteParts: string[] = [];
+      if (address && address !== 'N/D')
+        noteParts.push(`📍 Dirección: ${address}`);
+      if (deliveryTime && deliveryTime !== 'N/D')
+        noteParts.push(`⏰ Entrega preferida: ${deliveryTime}`);
+      if (noteParts.length > 0) {
+        updateData.notes = noteParts.join(' | ');
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -327,7 +333,7 @@ export class WhatsAppService {
       }
 
       const ack =
-        '¡Perfecto! 📦 Tus datos de entrega quedaron registrados. Te contactaré pronto para coordinar. 🚚✨';
+        '¡Perfecto! 📦 Tus datos de entrega quedaron registrados. Te contactaré para coordinar tu pedido a la hora que prefieras. 🚚✨';
       await this.sendMessage(phone, ack);
       await this.prisma.message.create({
         data: { phone, sender: 'ai', content: ack },
@@ -336,7 +342,9 @@ export class WhatsAppService {
       await this.notifyOwner(
         `📦 DATOS DE ENTREGA recibidos:\nCliente: ${client.name} (${phone})\nNombre: ${
           fullName || 'N/D'
-        }\nDirección: ${address || 'N/D'}\n\nContacta al cliente para coordinar la entrega 🚚`,
+        }\nDirección: ${address || 'N/D'}\nHora preferida: ${
+          deliveryTime || 'N/D'
+        }\n\nContacta al cliente para coordinar 🚚`,
       );
       return;
     }
