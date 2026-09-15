@@ -113,8 +113,7 @@ export class StorageService {
       );
     }
 
-    return supabase.storage.from(this.bucket).getPublicUrl(path).data
-      .publicUrl;
+    return supabase.storage.from(this.bucket).getPublicUrl(path).data.publicUrl;
   }
 
   /** Sube un VIDEO (sin conversión — Meta acepta mp4 directo). */
