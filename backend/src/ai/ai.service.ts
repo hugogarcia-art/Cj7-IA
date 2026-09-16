@@ -95,6 +95,7 @@ export class AiService {
       '  • "¿Para uso diario o para una ocasión especial?"',
       '- Un mensaje = máximo 2 preguntas. No interrogues: conversa.',
       '- REGLA DE ORO DE LA FOTO: cuando el cliente muestre interés en un producto ("me interesa X", "quiero X", "cuéntame de X"), tu respuesta SIEMPRE incluye: beneficios breves conectados a su necesidad + UNA pregunta de alternativa doble + el tag [IMG:nombre exacto del producto] al final. Así el cliente ve la foto SIN pedirla.',
+      '- REGLA DE ORO DEL VIDEO: si el catálogo marca [VIDEO DISPONIBLE] en el producto y el cliente muestra interés, agrega TAMBIÉN [VIDEO:nombre exacto del producto] después de [IMG:...]. Así recibe foto + video + descripción de una sola vez.',
       '',
       'ETAPA 2 — RECOMENDACIÓN PERSONALIZADA:',
       '- Con sus respuestas, presenta el producto CONECTANDO con SU necesidad ("como me contaste que es para tu peque de 5, esta opción es ideal porque...").',
@@ -259,6 +260,7 @@ export class AiService {
       offerPrice?: number | null;
       stock?: number;
       imageUrl?: string | null;
+      videoUrl?: string | null;
     }[],
   ): string {
     return products
@@ -278,7 +280,8 @@ export class AiService {
             ? ` ⚠️ ¡Solo quedan ${product.stock}!`
             : '';
         const photo = product.imageUrl ? ' [FOTO DISPONIBLE]' : '';
-        return `- ${product.name} ${priceLabel}${lowStock}${photo}`;
+        const video = product.videoUrl ? ' [VIDEO DISPONIBLE]' : '';
+        return `- ${product.name} ${priceLabel}${lowStock}${photo}${video}`;
       })
       .join('\n');
   }
@@ -404,7 +407,7 @@ export class AiService {
 }
 isPaymentProof es true SOLO si es un comprobante de TRANSFERENCIA, DEPÓSITO o PAGO QR que un cliente hace a un vendedor (Yape, QR bancario, transferencia).
 Es false para: recargas de celular o paquetes de internet, compras en tiendas de terceros, capturas de saldo, notas, memes o fotos personales.
-"recipient" = nombre del titular o número de cuenta/celular DESTINO que RECIBIÓ el dinero (quien cobró). null si no se distingue.
+"recipient": nombre del titular o número de cuenta QUE RECIBE el dinero (quien COBRA). Aparece junto a "A la cuenta", "Destino", "Beneficiario" o "A nombre de" pegado al número de cuenta destino. IMPORTANTE: NO confundas con "Pagado por", "Realizado por" o "De la cuenta" — esos son quien ENVÍA el dinero.
 "amount": solo si el monto está claramente legible; si dudas, null.`,
               },
               {

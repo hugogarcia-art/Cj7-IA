@@ -176,84 +176,74 @@ export class WhatsAppService {
       clientProfile, // <-- NUEVO
     );
 
-    // 🖼️ NUEVO: si la IA pidió una foto de producto [IMG:nombre], la enviamos
+    // 🖼️🎥 MEDIA: la respuesta puede traer [IMG:...], [VIDEO:...] o ambos.
+    // Orden: FOTO (con la descripción como caption) → VIDEO → texto si faltó material
     const imgMatch = aiResponse.match(IMAGE_TAG_PATTERN);
-    if (imgMatch) {
-      const requested = imgMatch[1].trim().toLowerCase();
-      const product = products.find(
-        (p) =>
-          p.name.toLowerCase().includes(requested) ||
-          requested.includes(p.name.toLowerCase().split(' ')[0]),
-      );
+    const videoMatch = aiResponse.match(VIDEO_TAG_PATTERN);
 
-      if (product?.imageUrl) {
-        const caption = aiResponse.replace(IMAGE_TAG_GLOBAL_PATTERN, '').trim();
+    if (imgMatch || videoMatch) {
+      const plainText = aiResponse
+        .replace(IMAGE_TAG_GLOBAL_PATTERN, '')
+        .replace(VIDEO_TAG_GLOBAL_PATTERN, '')
+        .trim();
 
-        await this.aiService.sendWhatsAppImage(
-          phone,
-          product.imageUrl,
-          caption || `📸 ${product.name}`,
+      const findProduct = (requested: string) =>
+        products.find(
+          (p) =>
+            p.name.toLowerCase().includes(requested) ||
+            requested.includes(p.name.toLowerCase().split(' ')[0]),
         );
-        this.logger.log(`🖼️ Foto de "${product.name}" enviada a ${phone}`);
 
-        const [extraImage] = product.extraImages;
-        if (extraImage) {
+      let sentSomething = false;
+
+      if (imgMatch) {
+        const product = findProduct(imgMatch[1].trim().toLowerCase());
+        if (product?.imageUrl) {
           await this.aiService.sendWhatsAppImage(
             phone,
-            extraImage,
-            `✨ Otra vista de ${product.name}`,
+            product.imageUrl,
+            plainText || `📸 ${product.name}`,
           );
-        }
+          sentSomething = true;
+          this.logger.log(`🖼️ Foto de "${product.name}" enviada a ${phone}`);
 
-        await this.prisma.message.create({
-          data: {
-            phone,
-            sender: 'ai',
-            content: `[Imagen: ${product.name}] ${caption || ''}`,
-          },
-        });
-        return; // La imagen ya fue la respuesta: terminamos aquí
+          const [extraImage] = product.extraImages;
+          if (extraImage) {
+            await this.aiService.sendWhatsAppImage(
+              phone,
+              extraImage,
+              `✨ Otra vista de ${product.name}`,
+            );
+          }
+        }
       }
 
-      // Producto sin foto disponible: respondemos solo con texto
-      const textOnly = aiResponse.replace(IMAGE_TAG_GLOBAL_PATTERN, '').trim();
+      if (videoMatch) {
+        const product = findProduct(videoMatch[1].trim().toLowerCase());
+        if (product?.videoUrl) {
+          await this.aiService.sendWhatsAppVideo(
+            phone,
+            product.videoUrl,
+            `🎥 Mira este video de ${product.name}`,
+          );
+          sentSomething = true;
+          this.logger.log(`🎥 Video de "${product.name}" enviada a ${phone}`);
+        }
+      }
+
+      await this.prisma.message.create({
+        data: { phone, sender: 'ai', content: `[Media] ${plainText}` },
+      });
+
+      if (sentSomething) return; // La descripción ya viajó como caption
+
+      // Sin foto/video cargados: responde solo texto, sin tags visibles
+      const textOnly =
+        plainText ||
+        'Claro que sí 😊 Ahora mismo no tengo ese material cargado, pero con gusto te cuento todo sobre el producto. ¿Qué quieres saber?';
       await this.sendMessage(phone, textOnly);
       await this.prisma.message.create({
         data: { phone, sender: 'ai', content: textOnly },
-      });
-      return;
-    }
-
-    // 🎥 [VIDEO:producto] — demostraciones y resultados en video
-    const videoMatch = aiResponse.match(VIDEO_TAG_PATTERN);
-    if (videoMatch) {
-      const requested = videoMatch[1].trim().toLowerCase();
-      const product = products.find(
-        (p) =>
-          p.name.toLowerCase().includes(requested) ||
-          requested.includes(p.name.toLowerCase().split(' ')[0]),
-      );
-
-      const caption = aiResponse.replace(VIDEO_TAG_GLOBAL_PATTERN, '').trim();
-
-      const videoUrl = (product as { videoUrl?: string | null } | undefined)
-        ?.videoUrl;
-      if (typeof videoUrl === 'string' && videoUrl.length > 0) {
-        await this.aiService.sendWhatsAppVideo(
-          phone,
-          videoUrl,
-          caption || `🎥 ${product.name}`,
-        );
-        await this.prisma.message.create({
-          data: { phone, sender: 'ai', content: `[Video: ${product.name}]` },
-        });
-        return;
-      }
-
-      // Sin video cargado: responde el texto sin el tag
-      await this.sendMessage(phone, caption);
-      await this.prisma.message.create({
-        data: { phone, sender: 'ai', content: caption },
       });
       return;
     }

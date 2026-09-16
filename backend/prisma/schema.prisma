@@ -9,23 +9,25 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  email       String   @unique
-  username    String   @unique
-  password    String
-  fullName    String?
-  gender      String?
-  clientCode  Int      @unique
-  bio         String?
-  role        String   @default("USER")
-  remarketingEnabled Boolean @default(false)
-  createdAt   DateTime @default(now())
-  clients     Client[]
-  products    Product[]
-  campaigns   Campaign[]
-  automations Automation[] 
-  testimonials Testimonial[]
+  id                 String               @id @default(uuid())
+  email              String               @unique
+  username           String               @unique
+  password           String
+  fullName           String?
+  gender             String?
+  clientCode         Int                  @unique
+  bio                String?
+  role               String               @default("USER")
+  remarketingEnabled Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  clients            Client[]
+  products           Product[]
+  campaigns          Campaign[]
+  automations        Automation[]
+  testimonials       Testimonial[]
   whatsappCredential WhatsAppCredentials?
+  bankAccounts       BankAccount[]
+  paymentQRs         PaymentQR[]
 }
 
 model WhatsAppCredentials {
@@ -61,41 +63,39 @@ model Client {
 }
 
 model Product {
-  
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  category    String?
+  id           String        @id @default(uuid())
+  name         String
+  description  String?
+  category     String?
   /// Único por cuenta: dos negocios pueden usar el mismo SKU.
-  sku         String
-  price       Float
-  offerPrice  Float?
-  cost        Float?
-  stock       Int      @default(0)
-  minStock    Int      @default(0)
-  imageUrl    String?
-  videoUrl    String?
-  extraImages String[]
+  sku          String
+  price        Float
+  offerPrice   Float?
+  cost         Float?
+  stock        Int           @default(0)
+  minStock     Int           @default(0)
+  imageUrl     String?
+  videoUrl     String?
+  extraImages  String[]
   testimonials Testimonial[]
-  status      String   @default("Activo")
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String
-  
+  status       String        @default("Activo")
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
 
   @@unique([userId, sku])
   @@index([userId, createdAt])
 }
 
 model Sale {
-  id            String     @id @default(uuid())
+  id            String   @id @default(uuid())
   total         Float
-  status        String     @default("Nuevo")
+  status        String   @default("Nuevo")
   paymentMethod String?
   notes         String?
-  createdAt     DateTime   @default(now())
+  createdAt     DateTime @default(now())
   clientId      String
-  client        Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([clientId])
 }
@@ -114,11 +114,11 @@ model Campaign {
   id             String    @id @default(uuid())
   name           String
   message        String
-  imageUrl       String?   // Imagen de la campaña (Supabase)
+  imageUrl       String? // Imagen de la campaña (Supabase)
   audience       String    @default("todos")
   status         String    @default("borrador") // borrador | programada | enviando | completada
   scheduledAt    DateTime? // Fecha/hora programada del envío
-  recurrenceDays Int?      // Si se define: se repite cada X días
+  recurrenceDays Int? // Si se define: se repite cada X días
   totalSent      Int       @default(0)
   totalFailed    Int       @default(0)
   totalOpened    Int       @default(0)
@@ -126,23 +126,66 @@ model Campaign {
   userId         String
   user           User      @relation(fields: [userId], references: [id])
 }
+
 model Automation {
+  id            String  @id @default(uuid())
+  type          String  @unique @default("remarketing_3_dias")
+  enabled       Boolean @default(false) // Interruptor ON/OFF
+  daysThreshold Int     @default(3) // Cada cuántos días
+  userId        String
+  user          User    @relation(fields: [userId], references: [id])
+}
+
+model Testimonial {
   id        String   @id @default(uuid())
-  type      String   @unique @default("remarketing_3_dias")
-  enabled   Boolean  @default(false) // Interruptor ON/OFF
-  daysThreshold Int  @default(3)     // Cada cuántos días
+  title     String // "Cliente satisfecha — La Paz"
+  content   String // "Compré el Xol Moringa y en 2 semanas me sentí con más energía..."
+  imageUrl  String? // Captura del testimonio o foto
+  product   Product? @relation(fields: [productId], references: [id])
+  productId String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
   userId    String
   user      User     @relation(fields: [userId], references: [id])
 }
-model Testimonial {
-  id         String   @id @default(uuid())
-  title      String   // "Cliente satisfecha — La Paz"
-  content    String   // "Compré el Xol Moringa y en 2 semanas me sentí con más energía..."
-  imageUrl   String?  // Captura del testimonio o foto
-  product    Product? @relation(fields: [productId], references: [id])
-  productId  String?
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
+
+model BankAccount {
+  id            String      @id @default(uuid())
+  userId        String
+  paymentQRs    PaymentQR[]
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Titular de la cuenta: "Hugo Quispe Garcia"
+  fullName      String
+  /// Nombre del banco: "BANCO UNION"
+  bankName      String
+  /// Numero de cuenta bancaria
+  accountNumber String
+  /// CCI opcional
+  cci           String?
+  /// Telefono Yape/Plin opcional
+  yapePhone     String?
+  /// La cuenta que el agente muestra por defecto
+  isDefault     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+
+  @@index([userId])
+}
+
+model PaymentQR {
+  id        String       @id @default(uuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Etiqueta: "QR Yape Biokits", "QR libre"
+  label     String
+  /// 379 = QR de monto fijo | null = QR libre (cualquier monto)
+  amount    Float?
+  /// Imagen del QR en Supabase
+  imageUrl  String
+  /// Cuenta bancaria vinculada (opcional)
+  accountId String?
+  account   BankAccount? @relation(fields: [accountId], references: [id])
+  isDefault Boolean      @default(false)
+  createdAt DateTime     @default(now())
+
+  @@index([userId])
 }

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { motion } from "framer-motion";
 import {
   LayoutDashboard, Users, ShoppingBag, ShoppingCart, DollarSign, TrendingUp, Bot,
-  Settings, Megaphone, Box, BarChart3, MessageSquare,
+  Settings, Megaphone, Box, BarChart3, MessageSquare, Star,
 } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
@@ -107,6 +107,9 @@ export default function DashboardPage() {
               </Link>
               <Link href="/dashboard/analitica" className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
                 <BarChart3 size={18} /> Analítica
+              </Link>
+              <Link href="/dashboard/agente/testimonios" className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
+                <Star size={18} /> Testimonios IA
               </Link>
             </nav>
           </div>

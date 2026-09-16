@@ -1,3 +1,5 @@
+import { BankAccountModule } from './bank-account/bank-account.module';
+import { PaymentQrModule } from './payment-qr/payment-qr.module';
 import { TestimonialModule } from './testimonial/testimonial.module';
 import { SaleModule } from './sale/sale.module';
 import { AutomationModule } from './automation/automation.module';
@@ -38,6 +40,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     SaleModule,
     PaymentModule,
     TestimonialModule,
+    BankAccountModule,
+    PaymentQrModule,
     //QueueModule,
   ],
   controllers: [AppController],

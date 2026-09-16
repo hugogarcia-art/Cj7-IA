@@ -60,7 +60,7 @@ export class CampaignController {
     // Sube la imagen a Supabase si viene una
     let imageUrl: string | undefined = undefined;
     if (image) {
-      const fileName = `campana-${Date.now()}.jpg`;
+      const fileName = `campana-${Date.now()}`;
       imageUrl = await this.storageService.uploadImage(image, fileName);
     }
 

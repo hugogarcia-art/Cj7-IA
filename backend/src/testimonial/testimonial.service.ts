@@ -39,7 +39,7 @@ export class TestimonialService {
 
     let imageUrl: string | undefined = undefined;
     if (file) {
-      const fileName = `testimonio-${Date.now()}.jpg`;
+      const fileName = `testimonio-${Date.now()}`;
       imageUrl = await this.storageService.uploadImage(file, fileName);
     }
 

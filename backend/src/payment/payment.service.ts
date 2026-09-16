@@ -52,13 +52,15 @@ export class PaymentVisionService {
           ? catalogPrices[0]
           : null;
 
-    // 🚨 ¿El dinero fue a NUESTRA cuenta o a otra?
+    // 🚨 ¿El dinero fue a NUESTRA cuenta? Buscamos nuestros identificadores
+    // (números y titular) en el destinatario Y en el análisis completo
     const recipient = analysis.recipient ?? null;
-    const expectedWords = this.getExpectedTitulars();
+    const identifiers = this.getPaymentIdentifiers();
+    const haystack = `${recipient ?? ''} ${analysis.rawAnalysis}`.toLowerCase();
     const wrongAccount =
       !!recipient &&
-      expectedWords.length > 0 &&
-      !expectedWords.some((word) => recipient.toLowerCase().includes(word));
+      identifiers.length > 0 &&
+      !identifiers.some((id) => haystack.includes(id.toLowerCase()));
 
     // 2. El cliente SIEMPRE existe antes de crear la venta (antes se usaba
     // el id del User como clientId y rompía la clave foránea)
@@ -169,15 +171,25 @@ export class PaymentVisionService {
     };
   }
 
-  /** Palabras del titular real según PAYMENT_INFO (ej: "hugo quispe garcia") */
-  private getExpectedTitulars(): string[] {
+  /** Identificadores de NUESTRAS cuentas según PAYMENT_INFO: números (cuenta, CCI, Yape) y palabras del titular. */
+  private getPaymentIdentifiers(): string[] {
     const info = process.env.PAYMENT_INFO ?? '';
-    const match = info.match(/Titular:\s*([^|]+)/i);
-    if (!match) return [];
-    return match[1]
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((word) => word.length > 3);
+    const tokens: string[] = [];
+
+    // Números propios: cuenta, CCI, Yape/Plin (6+ dígitos seguidos)
+    tokens.push(...(info.match(/\d{6,}/g) ?? []));
+
+    // Palabras del titular
+    const titular = info.match(/Titular:\s*([^|]+)/i);
+    if (titular) {
+      tokens.push(
+        ...titular[1]
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((word) => word.length > 3),
+      );
+    }
+    return tokens;
   }
 
   // 🔔 Notifica al dueño. Cubre 3 escenarios:
