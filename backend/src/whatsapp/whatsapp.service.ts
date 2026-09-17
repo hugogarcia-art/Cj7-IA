@@ -315,22 +315,78 @@ export class WhatsAppService {
 
     // 🏷️ Procesar tags especiales ANTES de enviar al cliente
     let responseToSend = aiResponse;
-    // 💳 [PAGO]: los datos de pago SIEMPRE vienen del entorno, jamás de la IA
+    // 💳 [PAGO]: lee cuentas y QRs del USUARIO desde la BD (multitenant).
+    // Fallback a PAYMENT_INFO/PAYMENT_QR_URL del .env si el usuario no cargó nada.
     if (/\[PAGO\]/i.test(responseToSend)) {
       responseToSend = responseToSend.replace(/\[PAGO\]/gi, '').trim();
-      const paymentInfo = process.env.PAYMENT_INFO?.trim();
-      const paymentMessage = paymentInfo
-        ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}\n\nCuéntame por cuál medio pagas y quedo atenta/o a tu comprobante 😊`
-        : 'Con gusto 😊 Un asesor te enviará los datos de pago en unos minutos.';
 
-      // 📷 Si existe QR de pago, envíalo primero
-      const qrUrl = process.env.PAYMENT_QR_URL?.trim();
-      if (qrUrl) {
+      // 1. Carga las cuentas y QRs del dueño
+      const [accounts, qrs] = await Promise.all([
+        this.prisma.bankAccount.findMany({
+          where: { userId: ownerId },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+        }),
+        this.prisma.paymentQR.findMany({
+          where: { userId: ownerId },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+        }),
+      ]);
+
+      // 2. ¿Hay QR de monto fijo que coincida con el producto en foco?
+      const focus = this.detectFocusProduct(history, products);
+      const exactQr =
+        (focus &&
+          qrs.find((qr) => qr.amount !== null && qr.amount === focus.price)) ||
+        null;
+      const chosenQr =
+        exactQr ?? qrs.find((qr) => qr.isDefault) ?? qrs[0] ?? null;
+
+      // 3. Envía el QR (imagen) si existe
+      if (chosenQr) {
+        const qrCaption = chosenQr.amount
+          ? `📷 Escanea este QR para pagar ${chosenQr.amount} Bs (${chosenQr.label})`
+          : '📷 Escanea este QR para pagar — cualquier monto';
         await this.aiService.sendWhatsAppImage(
           phone,
-          qrUrl,
-          '📷 Este es nuestro QR — escanéalo para pagar',
+          chosenQr.imageUrl,
+          qrCaption,
         );
+      }
+
+      // 4. Arma el texto con las cuentas del usuario (o fallback al .env)
+      let paymentMessage: string;
+      if (accounts.length > 0) {
+        const accountsText = accounts
+          .map((acc) => {
+            const lines = [
+              `🏦 ${acc.bankName}`,
+              `   Titular: ${acc.fullName}`,
+              `   Cuenta: ${acc.accountNumber}`,
+            ];
+            if (acc.cci) lines.push(`   CCI: ${acc.cci}`);
+            if (acc.yapePhone) lines.push(`   Yape/Plin: ${acc.yapePhone}`);
+            return lines.join('\n');
+          })
+          .join('\n\n');
+        paymentMessage = `${responseToSend}\n\n💳 DATOS DE PAGO:\n${accountsText}\n\nCuéntame por cuál medio pagas y quedo atenta/o a tu comprobante 😊`;
+      } else {
+        // Fallback: usuarios antiguos con PAYMENT_INFO del .env
+        const paymentInfo = process.env.PAYMENT_INFO?.trim();
+        paymentMessage = paymentInfo
+          ? `${responseToSend}\n\n💳 DATOS DE PAGO:\n${paymentInfo}\n\nCuéntame por cuál medio pagas y quedo atenta/o a tu comprobante 😊`
+          : 'Con gusto 😊 Un asesor te enviará los datos de pago en unos minutos.';
+      }
+
+      // 5. Si no se envió QR (no hay ninguno), intenta el QR del .env como fallback
+      if (!chosenQr) {
+        const envQrUrl = process.env.PAYMENT_QR_URL?.trim();
+        if (envQrUrl) {
+          await this.aiService.sendWhatsAppImage(
+            phone,
+            envQrUrl,
+            '📷 Este es nuestro QR — escanéalo para pagar',
+          );
+        }
       }
 
       await this.sendMessage(phone, paymentMessage);
