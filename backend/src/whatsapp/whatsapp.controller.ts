@@ -14,11 +14,13 @@ import type { Request, Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { Public } from '../auth/decorators/public.decorator';
 import { describeError } from '../common/errors';
+import { PrismaService } from '../prisma/prisma.service';
 
 type WhatsAppWebhookBody = {
   entry?: {
     changes?: {
       value?: {
+        metadata?: { phone_number_id?: string };
         messages?: {
           from?: string;
           type?: string;
@@ -37,17 +39,28 @@ type RequestWithRawBody = Request & { rawBody?: Buffer };
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
-  constructor(private readonly whatsappService: WhatsAppService) {}
+  constructor(
+    private readonly whatsappService: WhatsAppService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Public()
   @Get('webhook')
-  verifyWebhook(
+  async verifyWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
     @Query('hub.challenge') challenge: string,
     @Res() res: Response,
-  ): void {
-    const expected = this.whatsappService.verifyToken;
+  ): Promise<void> {
+    // Acepta el token global (.env) o el token personal de algún usuario
+    let expected = this.whatsappService.verifyToken;
+    if (token && token !== expected) {
+      const cred = await this.prisma.whatsAppCredentials.findFirst({
+        where: {verifyToken: token },
+        select: { verifyToken: true },
+      });
+      if (cred) expected = cred.verifyToken;
+    }
     if (expected && mode === 'subscribe' && token === expected) {
       res.status(200).send(challenge);
       return;
@@ -76,14 +89,20 @@ export class WhatsAppController {
     res.status(200).send('EVENT_RECEIVED');
 
     // 3. Luego procesa EN SEGUNDO PLANO (sin await)
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const value = body.entry?.[0]?.changes?.[0]?.value;
+    const message = value?.messages?.[0];
     const phone = message?.from;
+    const webhookPhoneNumberId = value?.metadata?.phone_number_id;
     if (!phone) return;
 
     // Si el cliente envió una imagen, se procesa como comprobante de pago.
     if (message.type === 'image' && message.image?.id) {
       try {
-        await this.whatsappService.handleIncomingImage(phone, message.image.id);
+        await this.whatsappService.handleIncomingImage(
+          phone,
+          message.image.id,
+          webhookPhoneNumberId,
+        );
       } catch (error: unknown) {
         this.logger.error(
           `Error procesando imagen de ${phone}: ${describeError(error)}`,
@@ -98,6 +117,7 @@ export class WhatsAppController {
           phone,
           message.location.latitude,
           message.location.longitude,
+          webhookPhoneNumberId,
         );
       } catch (error: unknown) {
         this.logger.error(
@@ -112,7 +132,11 @@ export class WhatsAppController {
     if (!text) return;
 
     try {
-      await this.whatsappService.handleIncomingMessage(phone, text);
+      await this.whatsappService.handleIncomingMessage(
+        phone,
+        text,
+        webhookPhoneNumberId,
+      );
     } catch (error: unknown) {
       this.logger.error(
         `Error procesando mensaje de ${phone}: ${describeError(error)}`,

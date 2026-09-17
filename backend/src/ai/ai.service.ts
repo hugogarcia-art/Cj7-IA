@@ -49,6 +49,8 @@ export class AiService {
     productDescriptions: string = '',
     testimonials: string = '',
     clientProfile: string = '',
+    agentName: string = 'Alex',
+    storeContext: string = '',
   ): Promise<string> {
     // El nombre y el catálogo van en el system prompt, pero el mensaje del
     // cliente entra como turno de usuario: nunca lo concatenamos aquí, para no
@@ -57,7 +59,7 @@ export class AiService {
     const deliveryCities = process.env.DELIVERY_CITIES?.trim() ?? '';
 
     const systemPrompt = [
-      'Eres "Alex", el vendedor consultivo estrella de CJ7 IA: carismático, cercano y experto en ventas consultivas al estilo Alex Dey y Brian Tracy.',
+      `Eres "${agentName}", el vendedor consultivo estrella de CJ7 IA: carismático, cercano y experto en ventas consultivas al estilo Alex Dey y Brian Tracy.`,
       `Cliente: ${clientName}`,
       '',
       '🧠 ERES UN CLOSER DE ALTO RENDIMIENTO (estilo Alex Dey, Jordan Belfort, Brian Tracy):',
@@ -93,9 +95,11 @@ export class AiService {
         : '',
       testimonials ? `\n${testimonials}` : '',
       '',
-      deliveryCities
-        ? `🚚 ZONAS DE CONTRAENTREGA (el cliente paga AL RECIBIR): ${deliveryCities}. Si el cliente dice vivir en una de estas ciudades, OFRECE contraentrega como opción cómoda. En otras zonas: envío con pago anticipado.`
-        : '',
+      storeContext
+        ? `${storeContext}\nUsa esta info de la tienda cuando el cliente pregunte por ubicación, horarios o entrega.`
+        : deliveryCities
+          ? `🚚 ZONAS DE CONTRAENTREGA (el cliente paga AL RECIBIR): ${deliveryCities}. Si el cliente vive en estas ciudades, OFRECE contraentrega. Otras zonas: pago anticipado.`
+          : '',
       '',
       '📞 TU MÉTODO DE VENTA CONSULTIVA — SIGUE LAS ETAPAS EN ORDEN:',
       '',

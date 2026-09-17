@@ -28,6 +28,8 @@ model User {
   whatsappCredential WhatsAppCredentials?
   bankAccounts       BankAccount[]
   paymentQRs         PaymentQR[]
+  agentConfig        AgentConfig?
+  storeInfo          StoreInfo?
 }
 
 model WhatsAppCredentials {
@@ -38,9 +40,12 @@ model WhatsAppCredentials {
   wabaId        String?
   accessToken   String
   displayPhone  String?
+  verifyToken   String?
   verified      Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@unique([phoneNumberId])
 }
 
 model Client {
@@ -188,4 +193,41 @@ model PaymentQR {
   createdAt DateTime     @default(now())
 
   @@index([userId])
+}
+
+model AgentConfig {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Categoría elegida: personal | salud | ropa | custom
+  category     String   @default("custom")
+  /// Nombre del agente: "Alex", "Sofía"...
+  agentName    String   @default("Alex")
+  /// Descripción libre de la personalidad/tono
+  personality  String?
+  /// Negocio: "Bioliffe - productos naturales"
+  businessName String?
+  /// Config extra en JSON (promociones, etc.)
+  extraConfig  String?
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model StoreInfo {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Ciudad principal: "La Paz"
+  city           String?
+  /// Dirección física: "Calle Ismael Montes 678"
+  address        String?
+  /// Horarios: "Lun-Sáb 9:00-19:00"
+  schedule       String?
+  /// Ofrece contraentrega en la ciudad
+  deliveryLocal  Boolean  @default(false)
+  /// Otras ciudades con envío
+  deliveryCities String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }

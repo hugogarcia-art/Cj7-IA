@@ -92,6 +92,10 @@ export default function DashboardPage() {
                 <LayoutDashboard size={18} /> Dashboard
               </button>
 
+              <Link href="/dashboard/agente" className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
+                <Bot size={18} /> Agente de IA
+              </Link>
+
               <Link href="/dashboard/clientes" className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-primary/10 text-gray-600 dark:text-gray-300 text-sm transition-colors">
                 <Users size={18} /> CRM Clientes
               </Link>

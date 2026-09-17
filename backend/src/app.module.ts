@@ -1,5 +1,8 @@
 import { BankAccountModule } from './bank-account/bank-account.module';
 import { PaymentQrModule } from './payment-qr/payment-qr.module';
+import { WhatsAppCredentialsModule } from './whatsapp-credentials/whatsapp-credentials.module';
+import { AgentConfigModule } from './agent-config/agent-config.module';
+import { StoreInfoModule } from './store-info/store-info.module';
 import { TestimonialModule } from './testimonial/testimonial.module';
 import { SaleModule } from './sale/sale.module';
 import { AutomationModule } from './automation/automation.module';
@@ -42,6 +45,9 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     TestimonialModule,
     BankAccountModule,
     PaymentQrModule,
+    WhatsAppCredentialsModule,
+    AgentConfigModule,
+    StoreInfoModule,
     //QueueModule,
   ],
   controllers: [AppController],

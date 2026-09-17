@@ -4,6 +4,7 @@ import { AiService } from '../ai/ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { optionalEnv } from '../common/env';
 import { PaymentVisionService } from '../payment/payment.service';
+import { WhatsAppCredentialsService } from '../whatsapp-credentials/whatsapp-credentials.service';
 
 const GRAPH_VERSION = 'v20.0';
 const IMAGE_TAG_PATTERN = /\[IMG:([^\]]+)\]/i;
@@ -19,6 +20,7 @@ export class WhatsAppService {
     private readonly prisma: PrismaService,
     private readonly aiService: AiService,
     private readonly paymentVision: PaymentVisionService,
+    private readonly credentialsService: WhatsAppCredentialsService,
   ) {}
 
   get verifyToken(): string {
@@ -62,7 +64,17 @@ export class WhatsAppService {
    * conocida y publicada en el repositorio. Ahora se configura por env y,
    * si no está, se usa la cuenta más antigua.
    */
-  private async resolveOwnerId(): Promise<string | null> {
+  private async resolveOwnerId(
+    webhookPhoneNumberId?: string,
+  ): Promise<string | null> {
+    if (webhookPhoneNumberId) {
+      const cred = await this.prisma.whatsAppCredentials.findUnique({
+        where: { phoneNumberId: webhookPhoneNumberId },
+        select: { userId: true },
+      });
+      if (cred) return cred.userId;
+    }
+
     const ownerEmail = optionalEnv('WHATSAPP_OWNER_EMAIL');
     const owner = ownerEmail
       ? await this.prisma.user.findUnique({
@@ -83,8 +95,12 @@ export class WhatsAppService {
     return owner.id;
   }
 
-  async handleIncomingMessage(phone: string, text: string): Promise<void> {
-    const ownerId = await this.resolveOwnerId();
+  async handleIncomingMessage(
+    phone: string,
+    text: string,
+    webhookPhoneNumberId?: string,
+  ): Promise<void> {
+    const ownerId = await this.resolveOwnerId(webhookPhoneNumberId);
     if (!ownerId) return;
 
     // Alta/actualización automática del contacto en el CRM.
@@ -139,6 +155,27 @@ export class WhatsAppService {
       },
     });
 
+    // 🧠 CONFIG DEL AGENTE + TIENDA del dueño (personalidad por usuario)
+    const [agentCfg, storeCfg] = await Promise.all([
+      this.prisma.agentConfig.findUnique({ where: { userId: ownerId } }),
+      this.prisma.storeInfo.findUnique({ where: { userId: ownerId } }),
+    ]);
+    const agentName = agentCfg?.agentName ?? 'Alex';
+    const storeContext = storeCfg
+      ? [
+          '🏪 INFO DE LA TIENDA (úsala para entregas y horarios):',
+          storeCfg.city ? `- Ciudad: ${storeCfg.city}` : '',
+          storeCfg.address ? `- Dirección: ${storeCfg.address}` : '',
+          storeCfg.schedule ? `- Horario de atención: ${storeCfg.schedule}` : '',
+          storeCfg.deliveryLocal ? '- Ofreces contraentrega en tu ciudad' : '',
+          storeCfg.deliveryCities
+            ? `- También envías a: ${storeCfg.deliveryCities}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
+
     // ⭐ Testimonios activos (prueba social para la IA)
     const testimonials = await this.prisma.testimonial.findMany({
       where: { userId: ownerId, active: true },
@@ -174,6 +211,8 @@ export class WhatsAppService {
       productDescriptions,
       testimonialsForAi,
       clientProfile, // <-- NUEVO
+      agentName,
+      storeContext,
     );
 
     // 🖼️🎥 MEDIA: la respuesta puede traer [IMG:...], [VIDEO:...] o ambos.
@@ -404,7 +443,7 @@ export class WhatsAppService {
         }
       }
 
-      await this.sendMessage(phone, paymentMessage);
+      await this.sendMessage(phone, paymentMessage, ownerId);
       await this.prisma.message.create({
         data: { phone, sender: 'ai', content: paymentMessage },
       });
@@ -589,8 +628,12 @@ export class WhatsAppService {
   }
 
   // Detecta si el mensaje es una imagen (comprobante de pago)
-  async handleIncomingImage(phone: string, imageId: string): Promise<void> {
-    const ownerId = await this.resolveOwnerId();
+  async handleIncomingImage(
+    phone: string,
+    imageId: string,
+    webhookPhoneNumberId?: string,
+  ): Promise<void> {
+    const ownerId = await this.resolveOwnerId(webhookPhoneNumberId);
     if (!ownerId) return;
 
     // Iguala el flujo del texto: guarda al cliente + el mensaje de imagen
@@ -691,8 +734,9 @@ export class WhatsAppService {
     phone: string,
     latitude: number,
     longitude: number,
+    webhookPhoneNumberId?: string,
   ): Promise<void> {
-    const ownerId = await this.resolveOwnerId();
+    const ownerId = await this.resolveOwnerId(webhookPhoneNumberId);
     if (!ownerId) return;
 
     const client = await this.prisma.client.upsert({
@@ -732,9 +776,39 @@ export class WhatsAppService {
     );
   }
 
-  private async sendMessage(phone: string, body: string): Promise<void> {
-    const phoneNumberId = optionalEnv('PHONE_NUMBER_ID');
-    const metaToken = optionalEnv('META_TOKEN');
+  /**
+   * Credenciales de envío del dueño: las suyas si las conectó,
+   * si no, las globales del .env (compatibilidad cuentas antiguas).
+   */
+  private async getOwnerCredentials(ownerId: string): Promise<{
+    phoneNumberId: string | null;
+    accessToken: string | null;
+  }> {
+    const cred = await this.prisma.whatsAppCredentials.findUnique({
+      where: { userId: ownerId },
+    });
+    if (cred?.verified) {
+      return { phoneNumberId: cred.phoneNumberId, accessToken: cred.accessToken };
+    }
+    return {
+      phoneNumberId: optionalEnv('PHONE_NUMBER_ID'),
+      accessToken: optionalEnv('META_TOKEN'),
+    };
+  }
+
+  private async sendMessage(
+    phone: string,
+    body: string,
+    ownerId?: string,
+  ): Promise<void> {
+    const creds = ownerId
+      ? await this.getOwnerCredentials(ownerId)
+      : {
+          phoneNumberId: optionalEnv('PHONE_NUMBER_ID'),
+          accessToken: optionalEnv('META_TOKEN'),
+        };
+    const phoneNumberId = creds.phoneNumberId;
+    const metaToken = creds.accessToken;
     if (!phoneNumberId || !metaToken) {
       this.logger.warn(
         'PHONE_NUMBER_ID o META_TOKEN sin configurar: no se envía la respuesta.',
