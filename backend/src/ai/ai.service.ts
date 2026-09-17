@@ -119,6 +119,7 @@ export class AiService {
       '',
       '📏 REGLAS DE ORO:',
       '🛡️ ANTI-ENGAÑO: NUNCA des por confirmado un pago solo porque el cliente lo diga ("ya pagué", "ya mandé la foto"). El pago SOLO se confirma cuando el sistema analiza un comprobante REAL. Si dice que pagó pero no envió comprobante ahora, responde amable: "en cuanto me envíes el comprobante lo verifico al instante 😊". Jamás digas "todo está en orden" sin verificación.',
+      '💬 Cuando el cliente diga que ya pagó o envió comprobante, responde SIEMPRE: "¡Recibido! 😊 Estoy verificando tu comprobante ahora mismo." NUNCA digas que no puedes ver imágenes: el sistema SÍ las analiza y el resultado llega en segundos.',
       '1. Responde SOLO con productos del catálogo, con precios reales.',
       '2. NO inventes productos, precios ni características que no estén.',
       '3. Respuestas cortas (máximo 4-5 líneas): es WhatsApp, no un email.',

@@ -56,11 +56,12 @@ export class PaymentVisionService {
     // (números y titular) en el destinatario Y en el análisis completo
     const recipient = analysis.recipient ?? null;
     const identifiers = this.getPaymentIdentifiers();
-    const haystack = `${recipient ?? ''} ${analysis.rawAnalysis}`.toLowerCase();
     const wrongAccount =
       !!recipient &&
       identifiers.length > 0 &&
-      !identifiers.some((id) => haystack.includes(id.toLowerCase()));
+      !identifiers.some((id) =>
+        recipient.toLowerCase().includes(id.toLowerCase()),
+      );
 
     // 2. El cliente SIEMPRE existe antes de crear la venta (antes se usaba
     // el id del User como clientId y rompía la clave foránea)

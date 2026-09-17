@@ -178,8 +178,23 @@ export class WhatsAppService {
 
     // 🖼️🎥 MEDIA: la respuesta puede traer [IMG:...], [VIDEO:...] o ambos.
     // Orden: FOTO (con la descripción como caption) → VIDEO → texto si faltó material
-    const imgMatch = aiResponse.match(IMAGE_TAG_PATTERN);
-    const videoMatch = aiResponse.match(VIDEO_TAG_PATTERN);
+    let imgMatch = aiResponse.match(IMAGE_TAG_PATTERN);
+    let videoMatch = aiResponse.match(VIDEO_TAG_PATTERN);
+
+    // 🎯 GARANTÍA: si la IA no puso tags pero el cliente mencionó un producto,
+    // inyectamos foto+video de todas formas (no dependemos de GPT)
+    if (!imgMatch && !videoMatch) {
+      const mentioned = products.find((p) => {
+        const first = p.name.toLowerCase().split(' ')[0];
+        return first.length > 3 && text.toLowerCase().includes(first);
+      });
+      if (mentioned) {
+        if (mentioned.imageUrl)
+          imgMatch = [mentioned.name, mentioned.name] as RegExpMatchArray;
+        if (mentioned.videoUrl)
+          videoMatch = [mentioned.name, mentioned.name] as RegExpMatchArray;
+      }
+    }
 
     if (imgMatch || videoMatch) {
       const plainText = aiResponse
