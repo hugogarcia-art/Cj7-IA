@@ -21,7 +21,10 @@ const ToBoolean = () =>
   });
 
 export class UpsertAgentConfigDto {
-  @IsIn(['personal', 'salud', 'ropa', 'custom'], {
+  @IsIn([
+    'personal', 'salud', 'ropa', 'accesorios', 'vehiculos',
+    'consultoria', 'bienes', 'telecom', 'servicios', 'custom',
+  ], {
     message: 'Categoría no válida.',
   })
   category: string;

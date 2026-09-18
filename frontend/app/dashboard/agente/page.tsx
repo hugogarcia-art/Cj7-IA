@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot, CheckCircle2, Store, Sparkles, X, User, Shirt, HeartPulse,
-  Smartphone,
+  Smartphone, Watch, Car, Home, Signal, Wrench, Briefcase,
 } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
 
@@ -30,11 +30,25 @@ type WspCredentials = {
   displayPhone?: string | null;
 } | null;
 
+const PRODUCT_CATEGORIES = [
+  { id: "salud", label: "Salud y Bienestar", icon: HeartPulse, desc: "Suplementos, farmacia, cuidado personal", personality: "Vendedor experto en salud y bienestar: empático, educado en beneficios, cuida las indicaciones." },
+  { id: "ropa", label: "Ropa y Moda", icon: Shirt, desc: "Moda, tallas, colores, temporada", personality: "Vendedor de moda: conoce tallas, colores y tendencias, sugiere combinaciones." },
+  { id: "accesorios", label: "Artículos y Accesorios", icon: Watch, desc: "Relojes, joyas, gadgets, complementos", personality: "Vendedor de accesorios: experto en calidad, materiales y estilo." },
+  { id: "vehiculos", label: "Vehículos", icon: Car, desc: "Autos, motos, repuestos", personality: "Vendedor de vehículos: experto en modelos, mecánica, financiamiento y test drive." },
+];
+
+const SERVICE_CATEGORIES = [
+  { id: "consultoria", label: "Consultoría", icon: Briefcase, desc: "Negocios, estrategia, gestión", personality: "Consultor comercial: experto en cierre B2B, propuestas de valor y contratos." },
+  { id: "bienes", label: "Bienes y Raíces", icon: Home, desc: "Casas, terrenos, alquileres", personality: "Asesor inmobiliario: experto en propiedades, visitas y cierres de compraventa." },
+  { id: "telecom", label: "Telecomunicaciones", icon: Signal, desc: "Internet, planes, equipos", personality: "Vendedor de telecomunicaciones: experto en planes, cobertura y retención." },
+  { id: "servicios", label: "Servicios Profesionales", icon: Wrench, desc: "Oficios, mantenimiento, eventos", personality: "Vendedor de servicios: experto en presupuestos, disponibilidad y garantía." },
+];
+
 const CATEGORIES = [
-  { id: "personal", label: "Asistente Personal", icon: User, desc: "Agenda, recordatorios y atención general" },
-  { id: "salud", label: "Salud y Bienestar", icon: HeartPulse, desc: "Suplementos, farmacia, cuidado personal" },
-  { id: "ropa", label: "Ropa y Accesorios", icon: Shirt, desc: "Moda, tallas, colores, temporada" },
-  { id: "custom", label: "Crear Mi Agente IA", icon: Sparkles, desc: "Personaliza todo: tu negocio, tu estilo" },
+  { id: "personal", label: "Asistente Personal", icon: User, desc: "Agenda, recordatorios y atención general", personality: "Asistente personal: cercano, organizado, ayuda con recordatorios y trámites." },
+  ...PRODUCT_CATEGORIES,
+  ...SERVICE_CATEGORIES,
+  { id: "custom", label: "Crear Mi Agente IA", icon: Sparkles, desc: "Personaliza todo: tu negocio, tu estilo", personality: "" },
 ];
 
 export default function AgentePage() {
@@ -118,12 +132,13 @@ export default function AgentePage() {
     if (!selectedCat) { setError("Elige una categoría."); return; }
     setSaving(true);
     try {
-      const catPersonality: Record<string, string> = {
-        personal: "Asistente personal: cercano, organizado, ayuda con recordatorios y trámites.",
-        salud: "Vendedor experto en salud y bienestar: empático, educado en beneficios, cuida las indicaciones.",
-        ropa: "Vendedor de moda: conoce tallas, colores y tendencias, sugiere combinaciones.",
-        custom: form.personality || "Vendedor profesional y carismático.",
-      };
+      // 🎭 Personality viene de la categoría elegida (las 10 definidas arriba)
+      const catPersonality: Record<string, string> = Object.fromEntries(
+        CATEGORIES.map((c) => [c.id, c.personality]),
+      );
+      if (selectedCat === "custom") {
+        catPersonality.custom = form.personality || "Vendedor profesional y carismático.";
+      }
       await apiFetch("/agent-config", {
         method: "PUT",
         body: {
@@ -557,12 +572,11 @@ export default function AgentePage() {
                 <h3 className="text-2xl font-bold">Crear Mi Agente</h3>
                 <button onClick={() => setWizardOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
               </div>
-
-              <p className="text-sm text-gray-500 mb-3">1. ¿Qué tipo de agente necesitas?</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                {CATEGORIES.map((cat) => (
-                  <button key={cat.id} type="button"
-                    onClick={() => setSelectedCat(cat.id)}
+              <p className="text-sm text-gray-500 mb-2">1. ¿Qué tipo de agente necesitas?</p>
+              <p className="text-xs font-bold text-gray-400 uppercase mb-2">📦 Productos</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                {CATEGORIES.filter(c => PRODUCT_CATEGORIES.some(p => p.id === c.id) || c.id === "personal").map((cat) => (
+                  <button key={cat.id} type="button" onClick={() => setSelectedCat(cat.id)}
                     className={`p-4 rounded-2xl border text-left transition-all ${selectedCat === cat.id ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-gray-200 dark:border-gray-700 hover:border-primary/50"}`}>
                     <cat.icon size={22} className="text-primary mb-2" />
                     <p className="font-bold text-sm">{cat.label}</p>
@@ -570,6 +584,23 @@ export default function AgentePage() {
                   </button>
                 ))}
               </div>
+              <p className="text-xs font-bold text-gray-400 uppercase mb-2">🛠️ Servicios</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                {CATEGORIES.filter(c => SERVICE_CATEGORIES.some(p => p.id === c.id)).map((cat) => (
+                  <button key={cat.id} type="button" onClick={() => setSelectedCat(cat.id)}
+                    className={`p-4 rounded-2xl border text-left transition-all ${selectedCat === cat.id ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-gray-200 dark:border-gray-700 hover:border-primary/50"}`}>
+                    <cat.icon size={22} className="text-primary mb-2" />
+                    <p className="font-bold text-sm">{cat.label}</p>
+                    <p className="text-xs text-gray-500 mt-1">{cat.desc}</p>
+                  </button>
+                ))}
+              </div>
+              <button type="button" onClick={() => setSelectedCat("custom")}
+                className={`w-full p-4 rounded-2xl border text-left transition-all mb-6 ${selectedCat === "custom" ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-gray-200 dark:border-gray-700 hover:border-primary/50"}`}>
+                <Sparkles size={22} className="text-primary mb-2" />
+                <p className="font-bold text-sm">✨ Crear Mi Agente IA (personalizado)</p>
+                <p className="text-xs text-gray-500 mt-1">Personaliza todo: tu negocio, tu estilo</p>
+              </button>
 
               <p className="text-sm text-gray-500 mb-3">2. Identidad de tu agente</p>
               <div className="space-y-4 mb-6">
@@ -588,18 +619,22 @@ export default function AgentePage() {
                     className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" />
                 )}
               </div>
-              {/* 🔓 PASO 3: API Key de OpenAI (BYOK — prueba gratis con TUS tokens) */}
-              <p className="text-sm text-gray-500 mb-2">3. Tu API Key de OpenAI (prueba gratis con TUS tokens)</p>
-              <input
-                type="password"
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
-                placeholder="sk-... (tu token de platform.openai.com)"
-                className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <p className="text-xs text-gray-400">
-                Tu key se guarda cifrada (AES-256) y NUNCA se muestra completa. Solo tú pagas tu consumo de OpenAI.
-              </p>
+              {/* 🔓 PASO 3: Tokens según el plan */}
+              {sub?.plan === "PRO" ? (
+                <div className="p-4 rounded-2xl bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/30">
+                  <p className="font-bold text-sm text-green-700 dark:text-green-400">✅ Tokens de OpenAI INCLUIDOS en tu plan PRO</p>
+                  <p className="text-xs text-gray-500 mt-1">Tu agente usa nuestra infraestructura — no configuras nada.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-500 mb-2">3. Tu API Key de OpenAI (prueba gratis con TUS tokens)</p>
+                  <input type="password" value={openaiKey}
+                    onChange={(e) => setOpenaiKey(e.target.value)}
+                    placeholder="sk-... (tu token de platform.openai.com)"
+                    className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" />
+                  <p className="text-xs text-gray-400">Cifrada AES-256 — al pasar a PRO, nuestros tokens van incluidos.</p>
+                </>
+              )}
 
               {/* 🎭 PASO 4: El prompt del agente */}
               <p className="text-sm text-gray-500 mt-4 mb-2">4. El prompt del agente</p>
