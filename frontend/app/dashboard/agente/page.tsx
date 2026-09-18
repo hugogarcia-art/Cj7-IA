@@ -6,7 +6,7 @@ import {
   Bot, CheckCircle2, Store, Sparkles, X, User, Shirt, HeartPulse,
   Smartphone,
 } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 
 type AgentConfig = {
   category: string;
@@ -44,6 +44,8 @@ export default function AgentePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [promptChoice, setPromptChoice] = useState<"oficial" | "custom">("oficial");
 
   // Wizard
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -57,7 +59,11 @@ export default function AgentePage() {
   const [storeForm, setStoreForm] = useState({
     city: "", address: "", schedule: "", deliveryLocal: false,
   });
-
+  // 💳 SUSCRIPCIÓN / PAYWALL
+  const [paywall, setPaywall] = useState<string | null>(null);
+  const [sub, setSub] = useState<{
+    plan: string; isTrial: boolean; trialExpired: boolean; daysLeft: number; priceUsd: number;
+  } | null>(null);
   // 📱 PASO 0 — WhatsApp
   const [wspOpen, setWspOpen] = useState(false);
   const [wspForm, setWspForm] = useState({
@@ -83,11 +89,19 @@ export default function AgentePage() {
         callbackUrl: string; verifyToken: string; isPersonal: boolean;
       }>("/whatsapp-credentials/setup-info");
       setSetupInfo(si ?? null);
+      const subscription = await apiFetch<{
+        plan: string; isTrial: boolean; trialExpired: boolean; daysLeft: number; priceUsd: number;
+      }>("/agent-config/subscription");
+      setSub(subscription ?? null);
       if (st) setStoreForm({
         city: st.city ?? "", address: st.address ?? "",
         schedule: st.schedule ?? "", deliveryLocal: st.deliveryLocal ?? false,
       });
     } catch (err) {
+      // 💳 Si el trial expiró, el backend devuelve 403 → mostramos el paywall
+      if (err instanceof ApiError && err.status === 403) {
+        setPaywall(err.message);
+      }
       console.error("Error cargando módulo agente:", err);
     } finally {
       setLoading(false);
@@ -120,7 +134,29 @@ export default function AgentePage() {
           isActive: true,
         },
       });
+
+      // 🔓 BYOK: guarda SU key OpenAI cifrada (si la puso)
+      if (openaiKey.trim()) {
+        await apiFetch("/agent-config/openai-key", {
+          method: "POST",
+          body: { apiKey: openaiKey.trim() },
+        });
+      }
+
+      // 🎭 Guarda el modo de prompt (oficial o su custom)
+      await apiFetch("/agent-config/prompt-mode", {
+        method: "PUT",
+        body: {
+          promptMode: promptChoice,
+          ...(promptChoice === "custom" && form.personality.trim()
+            ? { customPrompt: form.personality.trim() }
+            : {}),
+        },
+      });
+
       setWizardOpen(false);
+      setPromptChoice("oficial");
+      setOpenaiKey("");
       fetchData();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error al crear el agente");
@@ -296,6 +332,43 @@ export default function AgentePage() {
       </div>
     );
   }
+    // 💳 PAYWALL: trial expirado → pantalla de pago
+  if (paywall) {
+    return (
+      <div className="min-h-screen bg-gradient-soft flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass rounded-3xl p-10 w-full max-w-md text-center"
+        >
+          <p className="text-5xl mb-4">⏳</p>
+          <h1 className="text-2xl font-bold mb-2">Prueba gratuita expirada</h1>
+          <p className="text-gray-500 mb-6">{paywall}</p>
+          <div className="glass rounded-2xl p-6 mb-6">
+            <p className="text-sm text-gray-500">Plan PRO</p>
+            <p className="text-4xl font-bold text-primary mb-1">
+              $49<span className="text-lg text-gray-400">/mes</span>
+            </p>
+            <ul className="text-sm text-gray-600 text-left mt-3 space-y-1">
+              <li>✅ Agente de ventas 24/7 con IA</li>
+              <li>✅ CRM, campañas y analítica</li>
+              <li>✅ Verificación de comprobantes con IA</li>
+              <li>✅ Soporte prioritario</li>
+            </ul>
+          </div>
+          <button
+            onClick={() => alert("Pasarela de pago en preparación — contáctanos para activar tu plan PRO.")}
+            className="w-full bg-primary text-white py-3 rounded-xl shadow-glow hover:scale-105 transition-transform font-medium"
+          >
+            💳 Suscribirme por $49/mes
+          </button>
+          <Link href="/dashboard" className="block text-sm text-gray-500 mt-4 hover:text-primary">
+            Volver al Dashboard
+          </Link>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-soft p-4 md:p-8">
@@ -319,6 +392,11 @@ export default function AgentePage() {
           <div className={`px-4 py-2 rounded-full text-sm font-medium ${config.isActive ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"}`}>
             {config.isActive ? "🟢 Activo" : "⏸️ Inactivo"}
           </div>
+        )}
+        {sub?.isTrial && !paywall && (
+          <span className="bg-yellow-100 text-yellow-700 px-4 py-2 rounded-full text-sm font-medium">
+            ⏳ Prueba gratis: {sub.daysLeft} días restantes
+          </span>
         )}
       </div>
 
@@ -510,6 +588,39 @@ export default function AgentePage() {
                     className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" />
                 )}
               </div>
+              {/* 🔓 PASO 3: API Key de OpenAI (BYOK — prueba gratis con TUS tokens) */}
+              <p className="text-sm text-gray-500 mb-2">3. Tu API Key de OpenAI (prueba gratis con TUS tokens)</p>
+              <input
+                type="password"
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
+                placeholder="sk-... (tu token de platform.openai.com)"
+                className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <p className="text-xs text-gray-400">
+                Tu key se guarda cifrada (AES-256) y NUNCA se muestra completa. Solo tú pagas tu consumo de OpenAI.
+              </p>
+
+              {/* 🎭 PASO 4: El prompt del agente */}
+              <p className="text-sm text-gray-500 mt-4 mb-2">4. El prompt del agente</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setPromptChoice("oficial")}
+                  className={`p-4 rounded-2xl border text-left transition-all ${promptChoice === "oficial" ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-gray-200 dark:border-gray-700 hover:border-primary/50"}`}>
+                  <p className="font-bold text-sm">⭐ Oficial CJ7 IA</p>
+                  <p className="text-xs text-gray-500 mt-1">Recomendado — closer entrenado por nosotros (estilo Alex Dey)</p>
+                </button>
+                <button type="button" onClick={() => setPromptChoice("custom")}
+                  className={`p-4 rounded-2xl border text-left transition-all ${promptChoice === "custom" ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-gray-200 dark:border-gray-700 hover:border-primary/50"}`}>
+                  <p className="font-bold text-sm">✏️ Personalizado</p>
+                  <p className="text-xs text-gray-500 mt-1">Escribe tu propio prompt (las reglas del sistema se mantienen)</p>
+                </button>
+              </div>
+              {promptChoice === "custom" && (
+                <textarea rows={4} value={form.personality}
+                  onChange={(e) => setForm({ ...form, personality: e.target.value })}
+                  placeholder="Tu prompt personalizado: cómo debe hablar tu agente, qué técnicas usar, su tono..."
+                  className="w-full px-4 py-3 rounded-xl bg-white/50 dark:bg-white/5 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" />
+              )}
 
               {error && <p className="text-red-500 text-sm text-center mb-4">{error}</p>}
 

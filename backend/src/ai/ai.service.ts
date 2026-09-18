@@ -39,6 +39,23 @@ export class AiService {
     this.client = new OpenAI({ apiKey });
     return this.client;
   }
+  /** 🧠 BYOK: cliente OpenAI con la key del usuario, o la global como fallback. */
+  private clientWithKey: OpenAI | null = null;
+  private lastKeyUsed: string | null = null;
+
+  private getClientWithKey(userApiKey?: string | null): OpenAI {
+    const key = userApiKey?.trim() ?? optionalEnv('OPENAI_API_KEY');
+    if (!key) {
+      throw new ServiceUnavailableException(
+        'No hay API key de OpenAI configurada. El usuario debe conectar la suya.',
+      );
+    }
+    if (this.clientWithKey && this.lastKeyUsed === key)
+      return this.clientWithKey;
+    this.clientWithKey = new OpenAI({ apiKey: key });
+    this.lastKeyUsed = key;
+    return this.clientWithKey;
+  }
 
   // Módulo 1: Agente IA WhatsApp
   async generateWhatsAppResponse(
@@ -51,14 +68,15 @@ export class AiService {
     clientProfile: string = '',
     agentName: string = 'Alex',
     storeContext: string = '',
+    userApiKey?: string | null,
+    customPrompt?: string | null,
   ): Promise<string> {
     // El nombre y el catálogo van en el system prompt, pero el mensaje del
     // cliente entra como turno de usuario: nunca lo concatenamos aquí, para no
     // dejar que reescriba las instrucciones.
     // Ciudades con contraentrega (opcional, configurado por el dueño)
     const deliveryCities = process.env.DELIVERY_CITIES?.trim() ?? '';
-
-    const systemPrompt = [
+    const officialPrompt = [
       `Eres "${agentName}", el vendedor consultivo estrella de CJ7 IA: carismático, cercano y experto en ventas consultivas al estilo Alex Dey y Brian Tracy.`,
       `Cliente: ${clientName}`,
       '',
@@ -111,7 +129,7 @@ export class AiService {
       '  • "¿Prefieres el paquete individual o el pack familiar?"',
       '  • "¿Para uso diario o para una ocasión especial?"',
       '- Máximo 1-2 preguntas por mensaje. DOLOR primero, alternativa doble después, CIERRE asumido siempre.',
-      '- REGLA DE ORO DE LA FOTO: cuando el cliente muestre interés en un producto ("me interesa X", "quiero X", "cuéntame de X"), tu respuesta SIEMPRE incluye: beneficios breves conectados a su necesidad + UNA pregunta de alternativa doble + el tag [IMG:nombre exacto del producto] al final. Así el cliente ve la foto SIN pedirla.',
+      '- 🎯 REGLA DE ORO DEL PAQUETE COMPLETO: cuando el cliente muestre interés en un producto ("me interesa X", "quiero X", "cuéntame de X", "mas informacion de X"), tu respuesta SIEMPRE incluye LOS 3 ELEMENTOS JUNTOS en este orden: (1) descripción breve con beneficios conectados a su necesidad, (2) el tag [IMG:nombre exacto del producto], (3) si el catálogo marca [VIDEO DISPONIBLE], TAMBIÉN el tag [VIDEO:nombre exacto del producto] — siempre foto y video juntos, nunca uno solo. Cierra con UNA pregunta de alternativa doble. Ejemplo: "El Biokits Moringa sube las defensas de tu peque naturalmente 🔥 450→379 hoy. ¿Para un peque de 2 a 5 o de 6 a 12? [IMG:Biokits Moringa][VIDEO:Biokits Moringa]".',
       '- REGLA DE ORO DEL VIDEO: si el catálogo marca [VIDEO DISPONIBLE] en el producto y el cliente muestra interés, agrega TAMBIÉN [VIDEO:nombre exacto del producto] después de [IMG:...]. Así recibe foto + video + descripción de una sola vez.',
       '',
       'ETAPA 2 — RECOMENDACIÓN PERSONALIZADA:',
@@ -152,6 +170,20 @@ export class AiService {
       '11. Cuando el cliente pida TESTIMONIOS, pruebas, opiniones, fotos de testimonios o "quién lo ha usado", responde ÚNICAMENTE el tag [TESTIMONIAL:tema del testimonio] — el sistema enviará la evidencia. Ejemplo: [TESTIMONIAL:Biokits Moringa].',
     ].join('\n');
 
+    // 🎭 PROMPT DUAL: "oficial" CJ7 o personalizado del usuario
+    const systemPrompt =
+      (customPrompt?.trim() ?? '') !== ''
+        ? [
+            `Eres "${agentName}".`,
+            customPrompt!,
+            '📏 REGLAS DEL SISTEMA (no negociables, inclúyelas siempre):',
+            '1. Usa SOLO el catálogo con precios reales.',
+            '2. Tags disponibles: [IMG:producto], [VIDEO:producto], [TESTIMONIAL:tema], [ASESOR], [VENTA], [PAGO], [DATOS:nombre|dirección|hora].',
+            '3. NUNCA inventes datos bancarios ni des por confirmado un pago sin comprobante verificado.',
+            '4. Respuestas cortas (máx 4-5 líneas), 1-2 emojis, estilo WhatsApp.',
+          ].join('\n')
+        : officialPrompt;
+
     const conversationHistory = history.map((message) => ({
       role:
         message.sender === 'ai' ? ('assistant' as const) : ('user' as const),
@@ -159,7 +191,7 @@ export class AiService {
     }));
 
     try {
-      const response = await this.getClient().chat.completions.create({
+      const response = await this.getClientWithKey(userApiKey).chat.completions.create({
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -400,7 +432,10 @@ export class AiService {
   }
 
   // 💳 Analiza un comprobante de pago con GPT-4o Vision
-  async analyzePaymentProof(base64Image: string): Promise<{
+  async analyzePaymentProof(
+    base64Image: string,
+    userApiKey?: string | null,
+  ): Promise<{
     isPaymentProof: boolean;
     amount: number | null;
     method: string | null;
@@ -408,7 +443,7 @@ export class AiService {
     rawAnalysis: string;
   }> {
     try {
-      const response = await this.getClient().chat.completions.create({
+      const response = await this.getClientWithKey(userApiKey).chat.completions.create({
         model: 'gpt-4o',
         messages: [
           {

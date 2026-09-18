@@ -56,7 +56,7 @@ export class WhatsAppController {
     let expected = this.whatsappService.verifyToken;
     if (token && token !== expected) {
       const cred = await this.prisma.whatsAppCredentials.findFirst({
-        where: {verifyToken: token },
+        where: { verifyToken: token },
         select: { verifyToken: true },
       });
       if (cred) expected = cred.verifyToken;

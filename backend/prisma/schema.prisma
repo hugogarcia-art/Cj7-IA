@@ -20,6 +20,9 @@ model User {
   role               String               @default("USER")
   remarketingEnabled Boolean              @default(false)
   createdAt          DateTime             @default(now())
+  trialStartsAt  DateTime @default(now())
+  trialEndsAt    DateTime
+  plan           String   @default("TRIAL")  // TRIAL | FREE_EXPIRED | PRO
   clients            Client[]
   products           Product[]
   campaigns          Campaign[]
@@ -212,6 +215,12 @@ model AgentConfig {
   isActive     Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+    /// Claves BYOK del usuario (cifradas)
+  openaiApiKey    String?
+  /// Prompt elegido: "oficial" | "custom"
+  promptMode      String   @default("oficial")
+  /// Su prompt personalizado (si promptMode = custom)
+  customPrompt    String?
 }
 
 model StoreInfo {

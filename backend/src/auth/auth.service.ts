@@ -96,6 +96,7 @@ export class AuthService {
             fullName: dto.fullName ?? null,
             gender: dto.gender ?? null,
             clientCode: newClientCode,
+            trialEndsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
           },
         });
         return this.buildSession(newUser);

@@ -55,3 +55,19 @@ export class UpsertAgentConfigDto {
   @IsBoolean()
   isActive?: boolean;
 }
+export class SetOpenAiKeyDto {
+  @IsString()
+  @MinLength(20, { message: 'La API key de OpenAI parece inválida.' })
+  @MaxLength(300)
+  apiKey: string;
+}
+
+export class SetPromptModeDto {
+  @IsIn(['oficial', 'custom'], { message: 'Modo de prompt no válido.' })
+  promptMode: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  customPrompt?: string;
+}

@@ -33,6 +33,7 @@ export default function InventarioPage() {
   const [extraFiles, setExtraFiles] = useState<File[]>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
     name: "", description: "", category: "", sku: "",
@@ -81,6 +82,7 @@ export default function InventarioPage() {
     setImagePreview(null);
     setFormData({ name: "", description: "", category: "", sku: "", price: "", offerPrice: "", cost: "", stock: "", minStock: "", status: "Activo" });
     setIsModalOpen(true);
+    setVideoFile(null);
   };
 
   const openEditModal = (product: Product) => {
@@ -88,6 +90,7 @@ export default function InventarioPage() {
     setSelectedFile(null);
     setExtraFiles([]);
     setImagePreview(product.imageUrl || null);
+    setVideoFile(null);
     setFormData({
       name: product.name,
       description: product.description || "",
@@ -140,7 +143,8 @@ export default function InventarioPage() {
       fd.append("status", formData.status);
       if (selectedFile) fd.append("file", selectedFile);
       for (const extra of extraFiles) {
-        fd.append("extraImages", extra);
+      fd.append("extraImages", extra);
+      if (videoFile) fd.append("video", videoFile);
       }
 
       await apiFetch(
@@ -351,6 +355,22 @@ export default function InventarioPage() {
                   {extraFiles.length > 0 && (
                     <p className="text-xs text-gray-400 mt-2">
                       {extraFiles.length} foto{extraFiles.length === 1 ? "" : "s"} adicional{extraFiles.length === 1 ? "" : "es"} seleccionada{extraFiles.length === 1 ? "" : "s"}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-500 mb-1">
+                    🎥 Video del producto (MP4, máx. 16 MB — el agente lo enviará a tus clientes)
+                  </label>
+                  <input
+                    type="file"
+                    accept="video/mp4,video/3gpp"
+                    onChange={(e) => setVideoFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-primary/10 file:text-primary file:cursor-pointer"
+                  />
+                  {videoFile && (
+                    <p className="text-xs text-green-600 mt-1">
+                      ✅ Video seleccionado: {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)} MB)
                     </p>
                   )}
                 </div>

@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { optionalEnv } from '../common/env';
 import { PaymentVisionService } from '../payment/payment.service';
 import { WhatsAppCredentialsService } from '../whatsapp-credentials/whatsapp-credentials.service';
+import { AgentConfigService } from '../agent-config/agent-config.service';
 
 const GRAPH_VERSION = 'v20.0';
 const IMAGE_TAG_PATTERN = /\[IMG:([^\]]+)\]/i;
@@ -21,6 +22,7 @@ export class WhatsAppService {
     private readonly aiService: AiService,
     private readonly paymentVision: PaymentVisionService,
     private readonly credentialsService: WhatsAppCredentialsService,
+    private readonly agentConfigService: AgentConfigService,
   ) {}
 
   get verifyToken(): string {
@@ -166,7 +168,9 @@ export class WhatsAppService {
           '🏪 INFO DE LA TIENDA (úsala para entregas y horarios):',
           storeCfg.city ? `- Ciudad: ${storeCfg.city}` : '',
           storeCfg.address ? `- Dirección: ${storeCfg.address}` : '',
-          storeCfg.schedule ? `- Horario de atención: ${storeCfg.schedule}` : '',
+          storeCfg.schedule
+            ? `- Horario de atención: ${storeCfg.schedule}`
+            : '',
           storeCfg.deliveryLocal ? '- Ofreces contraentrega en tu ciudad' : '',
           storeCfg.deliveryCities
             ? `- También envías a: ${storeCfg.deliveryCities}`
@@ -175,6 +179,12 @@ export class WhatsAppService {
           .filter(Boolean)
           .join('\n')
       : '';
+    // 🔓 BYOK: key OpenAI descifrada del dueño + su modo de prompt
+    const userApiKey =
+      await this.agentConfigService.getDecryptedOpenAiKey(ownerId);
+    const promptMode = agentCfg?.promptMode ?? 'oficial';
+    const customPrompt =
+      promptMode === 'custom' ? agentCfg?.customPrompt : null;
 
     // ⭐ Testimonios activos (prueba social para la IA)
     const testimonials = await this.prisma.testimonial.findMany({
@@ -213,6 +223,8 @@ export class WhatsAppService {
       clientProfile, // <-- NUEVO
       agentName,
       storeContext,
+      userApiKey,
+      customPrompt,
     );
 
     // 🖼️🎥 MEDIA: la respuesta puede traer [IMG:...], [VIDEO:...] o ambos.
@@ -221,11 +233,23 @@ export class WhatsAppService {
     let videoMatch = aiResponse.match(VIDEO_TAG_PATTERN);
 
     // 🎯 GARANTÍA: si la IA no puso tags pero el cliente mencionó un producto,
-    // inyectamos foto+video de todas formas (no dependemos de GPT)
     if (!imgMatch && !videoMatch) {
+      const wantsInfo =
+        text.toLowerCase().includes('informacion') ||
+        text.toLowerCase().includes('información') ||
+        text.toLowerCase().includes('detalles') ||
+        text.toLowerCase().includes('mas de') ||
+        text.toLowerCase().includes('más de');
       const mentioned = products.find((p) => {
         const first = p.name.toLowerCase().split(' ')[0];
-        return first.length > 3 && text.toLowerCase().includes(first);
+        return (
+          (first.length > 3 && text.toLowerCase().includes(first)) ||
+          (wantsInfo &&
+            history.some(
+              (h) =>
+                h.sender === 'user' && h.content.toLowerCase().includes(first),
+            ))
+        );
       });
       if (mentioned) {
         if (mentioned.imageUrl)
@@ -687,7 +711,9 @@ export class WhatsAppService {
 
     // 🎯 Producto en foco: del que hablaban antes del pago
     const focusProduct = this.detectFocusProduct(history, catalog);
-
+    // 🔓 BYOK: key del dueño para el Vision que analiza el comprobante
+    const userApiKey =
+      await this.agentConfigService.getDecryptedOpenAiKey(ownerId);
     // Analiza con Vision AI y registra la venta COMPARANDO contra el precio real
     const analysis = await this.paymentVision.processPaymentProof(
       ownerId,
@@ -788,7 +814,10 @@ export class WhatsAppService {
       where: { userId: ownerId },
     });
     if (cred?.verified) {
-      return { phoneNumberId: cred.phoneNumberId, accessToken: cred.accessToken };
+      return {
+        phoneNumberId: cred.phoneNumberId,
+        accessToken: cred.accessToken,
+      };
     }
     return {
       phoneNumberId: optionalEnv('PHONE_NUMBER_ID'),
